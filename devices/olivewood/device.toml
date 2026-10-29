@@ -1,0 +1,65 @@
+schema_version = 1
+
+[device]
+codename = "olivewood"
+manufacturer = "Xiaomi"
+model = "Redmi 8A Dual"
+soc = "Qualcomm SDM439 Snapdragon 439"
+variants = ["m2001c3k3i", "m2003c3k3i"]
+
+[[sources]]
+id = "lineage-wiki-device"
+url = "https://github.com/LineageOS/lineage_wiki/blob/HEAD/_data/devices/Mi439_variant4.yml"
+description = "LineageOS wiki data for the Redmi 8A Dual (read through the GitHub API): model number, SoC, storage and RAM options, install method, kernel repository."
+
+[[sources]]
+id = "lineage-device-tree"
+url = "https://github.com/LineageOS/android_device_xiaomi_Mi439/blob/HEAD/board-info.txt"
+description = "LineageOS shared device tree for the SDM439 family; board-info.txt lists olivewood among the accepted boards (read directly)."
+
+[[sources]]
+id = "lineage-kernel"
+url = "https://github.com/LineageOS/android_kernel_xiaomi_msm8937/blob/HEAD/Makefile"
+description = "LineageOS downstream kernel tree for this family; its Makefile declares Linux 4.19.325 (read directly)."
+
+[[sources]]
+id = "wikipedia-redmi-8"
+url = "https://en.wikipedia.org/wiki/Redmi_8"
+description = "Encyclopedia page giving a model number and codename for the Redmi 8A Dual, eMMC 5.1 storage and a 5000 mAh battery (read directly; third party, secondary)."
+
+[[sources]]
+id = "pmos-olive-deviceinfo"
+url = "https://gitlab.com/postmarketOS/pmaports/-/blob/master/device/testing/device-xiaomi-olive/deviceinfo"
+description = "postmarketOS deviceinfo for the sibling Redmi 8 (olive): fastboot flashing and boot image header version 1. No olivewood package was found (read directly)."
+
+[[sources]]
+id = "xiaomi-unlock-faq"
+url = "https://www.mi.com/global/support/faq/details/KA-07238/"
+description = "Xiaomi bootloader unlock FAQ. NOT read: the server refused the fetch (HTTP 403). Known only from search-result summaries."
+
+[research.bootloader]
+outcome = "unknown"
+summary = "The LineageOS install method for this device is fastboot-based, which suggests an unlockable bootloader. The vendor unlock policy (account, waiting time, data wipe) was not read from the vendor page, and search summaries disagree on the waiting time. Not assessed."
+sources = ["lineage-wiki-device", "xiaomi-unlock-faq"]
+
+[research.kernel]
+outcome = "feasible"
+summary = "A maintained downstream Linux 4.19 tree exists for the SDM439 family and its board list names olivewood, so a vendor-kernel starting point is available. No upstream device tree for SDM439 was found; mainline use would rely on a downstream-of-mainline fork, whose olivewood coverage was not checked."
+sources = ["lineage-kernel", "lineage-device-tree"]
+
+[research.hardware_minimum]
+outcome = "unknown"
+summary = "Storage is reported as eMMC 5.1 and Wi-Fi as 802.11 b/g/n. Charging and battery behaviour, which a headless server needs, was not sourced for olivewood; secondhand reports for the sibling olive were not verified. Not assessed."
+sources = ["lineage-wiki-device", "wikipedia-redmi-8", "pmos-olive-deviceinfo"]
+
+[safety]
+recovery = "RECOVERY.md"
+proposed_writes = []
+protected_partitions = []
+partition_sources = []
+
+[[claims]]
+capability = "boot"
+state = "not_tested"
+verification = "none"
+evidence = []
