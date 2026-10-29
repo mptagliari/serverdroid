@@ -3,9 +3,9 @@ schema_version = 1
 [device]
 codename = "olivewood"
 manufacturer = "Xiaomi"
-model = "Redmi 8A Dual"
+model = "Redmi 8A Dual, M2001C3K3I"
 soc = "Qualcomm SDM439 Snapdragon 439"
-variants = ["m2001c3k3i", "m2003c3k3i"]
+variants = ["m2001c3k3i"]
 
 [[sources]]
 id = "lineage-wiki-device"
@@ -39,7 +39,7 @@ description = "Xiaomi bootloader unlock FAQ. NOT read: the server refused the fe
 
 [research.bootloader]
 outcome = "unknown"
-summary = "The LineageOS install method for this device is fastboot-based, which suggests an unlockable bootloader. The vendor unlock policy (account, waiting time, data wipe) was not read from the vendor page, and search summaries disagree on the waiting time. Not assessed."
+summary = "The LineageOS install method for this device is fastboot-based, which suggests an unlockable bootloader. The vendor unlock policy (account, waiting time, data wipe) was not read from the vendor page, and search summaries disagree on the waiting time; the official unlock path itself remains unassessed. A specific owned unit of this model was read, read-only, over adb (Android 10, security patch 2021-12-01, region BR): its bootloader is currently locked (ro.boot.flash.locked=1, verifiedbootstate=green), the stock, unmodified state, which is a current-status observation, not a feasibility finding."
 sources = ["lineage-wiki-device", "xiaomi-unlock-faq"]
 
 [research.kernel]
@@ -49,7 +49,7 @@ sources = ["lineage-kernel", "lineage-device-tree"]
 
 [research.hardware_minimum]
 outcome = "unknown"
-summary = "Storage is reported as eMMC 5.1 and Wi-Fi as 802.11 b/g/n. Charging and battery behaviour, which a headless server needs, was not sourced for olivewood; secondhand reports for the sibling olive were not verified. Not assessed."
+summary = "Storage is reported as eMMC 5.1 and Wi-Fi as 802.11 b/g/n. Charging and battery behaviour, which a headless server needs, was not sourced for olivewood; secondhand reports for the sibling olive were not verified. Not assessed. A read-only check of an owned unit's stock Android build found it ships 32-bit userspace only (no arm64-v8a in ro.product.cpu.abilist64) despite the SoC's 64-bit-capable cores; this does not by itself block a full userspace replacement with an aarch64 root, as the saipan recipe does, but is recorded as a fact, not a feasibility claim."
 sources = ["lineage-wiki-device", "wikipedia-redmi-8", "pmos-olive-deviceinfo"]
 
 [safety]
