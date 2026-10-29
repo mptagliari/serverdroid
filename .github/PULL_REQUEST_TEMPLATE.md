@@ -19,3 +19,5 @@ Research-only / recipe / evidence / independent review:
 - [ ] I limited claims to the recipe, artifact set and variants actually tested.
 - [ ] I understand automated screening is partial and logs are not attestation.
 - [ ] I request human maintainer review; agent recommendations are advisory.
+
+<!-- protection test -->
