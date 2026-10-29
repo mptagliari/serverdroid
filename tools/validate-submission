@@ -1,0 +1,577 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Matheus Tagliari
+"""Validate submission data without executing candidate code or using the network."""
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import stat
+import sys
+import tomllib
+from urllib.parse import urlsplit
+
+VERSION = "1.1.0"
+MAX_FILE = 1024 * 1024
+MAX_TOTAL = 10 * MAX_FILE
+MAX_FILES = 1000
+MAX_ENTRIES = 2000
+SHA = re.compile(r"[0-9a-f]{64}\Z")
+REV = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
+ID = re.compile(r"[a-z][a-z0-9_.-]{0,79}\Z")
+NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}\Z")
+EXTENSIONS = {".md", ".toml", ".json", ".py", ".sh", ".yml", ".yaml",
+              ".txt", ".patch", ".diff", ".config", ".env"}
+CAPABILITIES = {"build", "boot", "storage", "network", "power", "stability"}
+TESTS = {"build.clean": "build", "boot.userspace": "boot",
+         "storage.roundtrip": "storage", "network.ssh": "network"}
+VERIFICATIONS = {"none", "build_verified", "hardware_reported", "reproduced",
+                 "independently_hardware_verified"}
+PROBE_SHA = hashlib.sha256(b"ServerDroid storage probe v1\n").hexdigest()
+SECRET_PATTERNS = [
+    re.compile(r"-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----"),
+    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,})\b"),
+    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
+    re.compile(r"\b(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp\d+)\s+[A-Za-z0-9+/]{30,}={0,3}"),
+    re.compile(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b"),
+    re.compile(r"/(?:home|Users)/[A-Za-z0-9_.-]+/"),
+    re.compile(r"(?im)^\s*(?:serial(?:no|number)?|imei)\s*[:=]\s*\S+"),
+]
+
+
+class Invalid(ValueError):
+    pass
+
+
+def need(condition, message):
+    if not condition:
+        raise Invalid(message)
+
+
+def obj(value, required, optional=()):
+    need(isinstance(value, dict), "expected an object")
+    need(set(required) <= value.keys(), "missing required fields")
+    need(value.keys() <= set(required) | set(optional), "unknown fields")
+    return value
+
+
+def text(value):
+    need(isinstance(value, str) and bool(value.strip()) and len(value) <= 8192,
+         "expected nonempty text")
+    need(not any(ord(c) < 32 and c not in "\n\t" for c in value), "control characters")
+    return value
+
+
+def strings(value, nonempty=False):
+    need(isinstance(value, list) and (not nonempty or bool(value)), "expected a list")
+    for item in value:
+        text(item)
+    need(len(value) == len(set(value)), "duplicate list entries")
+    return value
+
+
+def ident(value):
+    need(isinstance(value, str) and ID.fullmatch(value), "invalid identifier")
+    return value
+
+
+def digest(value):
+    need(isinstance(value, str) and SHA.fullmatch(value), "invalid sha256")
+    return value
+
+
+def revision(value):
+    need(isinstance(value, str) and REV.fullmatch(value), "expected a full commit revision")
+
+
+def integer(value, minimum=0):
+    need(type(value) is int and value >= minimum, "invalid integer")
+    return value
+
+
+def url(value):
+    parsed = urlsplit(text(value))
+    need(parsed.scheme == "https" and parsed.hostname and not parsed.username
+         and not parsed.password and not parsed.query and not parsed.fragment,
+         "expected a credential-free HTTPS URL without query or fragment")
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def build_id(build):
+    return sha(json.dumps(build, sort_keys=True, separators=(",", ":"),
+                          ensure_ascii=True).encode("utf-8"))
+
+
+def unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        need(key not in result, "duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def bad_constant(_):
+    raise Invalid("non-finite JSON number")
+
+
+def parse_json(value):
+    return json.loads(value, object_pairs_hook=unique_pairs, parse_constant=bad_constant)
+
+
+def luhn(value):
+    digits = [int(c) for c in value]
+    return sum(sum(divmod(n * 2, 10)) if i % 2 else n
+               for i, n in enumerate(reversed(digits))) % 10 == 0
+
+
+def scan(root):
+    """Bound memory use, reject links/special files, then screen every candidate file."""
+    files = {}
+    total = 0
+    count = 0
+    root = Path(root)
+    need(root.is_dir() and not root.is_symlink(), "root must be a real directory")
+
+    def walk(folder, depth):
+        nonlocal total, count
+        need(depth <= 12, "directory depth limit exceeded")
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                count += 1
+                need(count <= MAX_ENTRIES, "entry count limit exceeded")
+                rel = Path(entry.path).relative_to(root).as_posix()
+                need(NAME.fullmatch(entry.name) and entry.name not in {".", ".."},
+                     "unsafe filename")
+                mode = entry.stat(follow_symlinks=False).st_mode
+                need(not stat.S_ISLNK(mode), "symlink rejected")
+                if rel == ".git":
+                    need(stat.S_ISDIR(mode), "unexpected .git entry")
+                    continue
+                if stat.S_ISDIR(mode):
+                    walk(entry.path, depth + 1)
+                    continue
+                need(stat.S_ISREG(mode) and entry.stat().st_nlink == 1,
+                     "special file or hard link rejected")
+                need(not mode & (stat.S_ISUID | stat.S_ISGID), "unsafe file mode")
+                need(len(files) < MAX_FILES, "file count limit exceeded")
+                size = entry.stat().st_size
+                total += size
+                need(size <= MAX_FILE and total <= MAX_TOTAL, "file size limit exceeded")
+                path = Path(entry.name)
+                need(path.suffix in EXTENSIONS or entry.name in
+                     {"LICENSE", "Makefile", "validate-submission", ".gitignore", "CODEOWNERS"},
+                     "unapproved file type")
+                with open(entry.path, "rb") as handle:
+                    data = handle.read(MAX_FILE + 1)
+                need(len(data) == size and len(data) <= MAX_FILE, "file changed during scan")
+                need(not data.startswith((b"\x7fELF", b"ANDROID!", b"VNDRBOOT", b"MZ",
+                                          b"PK\x03\x04", b"\x1f\x8b")), "binary signature rejected")
+                need(b"\0" not in data, "binary content rejected")
+                content = data.decode("utf-8")
+                need(not any(ord(c) < 32 and c not in "\n\r\t" for c in content),
+                     "binary/control content rejected")
+                need(not any(p.search(content) for p in SECRET_PATTERNS),
+                     "potential private identifier or credential; inspect locally")
+                need(not any(luhn(m.group()) for m in
+                             re.finditer(r"(?<!\d)\d{15}(?!\d)", content)),
+                     "potential IMEI; inspect locally")
+                if path.suffix in {".py", ".sh"} or entry.name == "validate-submission":
+                    need(any("SPDX-License-Identifier:" in line for line in
+                             content.splitlines()[:5]), "script requires an SPDX header")
+                files[rel] = data
+    walk(root, 0)
+    return files
+
+
+class Device:
+    def __init__(self, files, folder):
+        self.files = files
+        self.folder = folder
+        self.prefix = f"devices/{folder}/"
+
+    def read(self, path):
+        text(path)
+        p = PurePosixPath(path)
+        need(not p.is_absolute() and all(NAME.fullmatch(s) and s not in {".", ".."}
+                                       for s in path.split("/")), "unsafe reference path")
+        key = self.prefix + path
+        need(key in self.files, "missing referenced file")
+        return self.files[key]
+
+    def hashed_file(self, record):
+        obj(record, {"path", "sha256"})
+        need(sha(self.read(record["path"])) == digest(record["sha256"]),
+             "referenced file hash mismatch")
+
+    def load(self):
+        p = tomllib.loads(self.read("device.toml").decode("utf-8"))
+        obj(p, {"schema_version", "device", "sources", "research", "safety", "claims"},
+            {"build"})
+        need(type(p["schema_version"]) is int and p["schema_version"] == 1,
+             "unsupported profile schema")
+        device = obj(p["device"], {"codename", "manufacturer", "model", "soc", "variants"})
+        ident(device["codename"])
+        need(device["codename"] == ("template" if self.folder == "TEMPLATE" else self.folder),
+             "codename must match folder")
+        for field in ("manufacturer", "model", "soc"):
+            text(device[field])
+        variants = strings(device["variants"], True)
+        for variant in variants:
+            ident(variant)
+        text(self.read("REPORT.md").decode("utf-8"))
+        sources = {}
+        need(isinstance(p["sources"], list) and p["sources"], "sources required")
+        for source in p["sources"]:
+            obj(source, {"id", "url", "description"}, {"revision", "sha256", "license"})
+            key = ident(source["id"])
+            need(key not in sources, "duplicate source id")
+            url(source["url"])
+            text(source["description"])
+            for field in ("revision", "license"):
+                if field in source:
+                    text(source[field])
+            if "sha256" in source:
+                digest(source["sha256"])
+            sources[key] = source
+        obj(p["research"], {"bootloader", "kernel", "hardware_minimum"})
+        investigated = True
+        for gate in p["research"].values():
+            obj(gate, {"outcome", "summary", "sources"})
+            need(gate["outcome"] in {"unknown", "feasible", "blocked"}, "invalid gate outcome")
+            text(gate["summary"])
+            refs = strings(gate["sources"], True)
+            need(set(refs) <= sources.keys(), "unknown gate source")
+            investigated &= gate["outcome"] != "unknown"
+        safety = obj(p["safety"], {"recovery", "proposed_writes", "protected_partitions",
+                                   "partition_sources"})
+        text(self.read(safety["recovery"]).decode("utf-8"))
+        writes = strings(safety["proposed_writes"])
+        protected = strings(safety["protected_partitions"])
+        need(not set(writes) & set(protected), "write targets overlap protected partitions")
+        for partition in writes + protected:
+            ident(partition)
+        refs = strings(safety["partition_sources"])
+        need(set(refs) <= sources.keys(), "unknown partition source")
+        need(not (writes or protected) or refs, "partition assertions require sources")
+        self.profile = p
+        self.variants = variants
+        self.artifacts = {}
+        self.build_digest = None
+        if "build" in p:
+            self.check_build(p["build"], sources)
+        runs = self.runs()
+        claims = self.claims(p["claims"], runs)
+        maturity = {}
+        for variant in variants:
+            level = "Investigated" if investigated else "Unassessed"
+            if investigated:
+                capabilities = {cap for (var, cap) in claims if var == variant}
+                if "build" in capabilities:
+                    level = "Buildable"
+                    if "boot" in capabilities:
+                        level = "Boot verified (hardware-reported)"
+            maturity[variant] = level
+        # A failed result may be retained without a claim (honest history), but a claim cites only runs that
+        # passed, so every failed result for this build is listed here for the reviewer: it cannot be hidden.
+        failed = [{"run": rid, "test": tid, "variant": run["variant"]}
+                  for rid, run in sorted(runs.items())
+                  for tid, ok in sorted(run["results"].items()) if not ok]
+        valid_for = [v for v in variants if maturity[v] not in {"Unassessed", "Investigated"}]
+        return {"device": device["codename"], "build_id": self.build_digest,
+                "maturity_by_variant": maturity,
+                "recipe_valid_for": valid_for,
+                "not_tested": [v for v in variants if v not in valid_for],
+                "failed_results": failed,
+                "declared_claims": p["claims"],
+                "limits": ["Consistency only; provenance is contributor-declared.",
+                           "Operational, Replicated and Maintained are not derived in v1."]}
+
+    def check_build(self, b, sources):
+        obj(b, {"recipe", "revision", "variants", "sources", "toolchain", "config",
+                "patches", "inputs", "artifacts"})
+        self.hashed_file(b["recipe"])
+        revision(b["revision"])
+        variants = strings(b["variants"], True)
+        need(set(variants) <= set(self.variants), "build variant not in device")
+        refs = strings(b["sources"], True)
+        need(set(refs) <= sources.keys(), "unknown build source")
+        for ref in refs:
+            source = sources[ref]
+            need({"revision", "sha256", "license"} <= source.keys(),
+                 "build sources need revision, sha256 and license")
+            revision(source["revision"])
+        obj(b["toolchain"], {"name", "version"})
+        text(b["toolchain"]["name"])
+        text(b["toolchain"]["version"])
+        self.hashed_file(b["config"])
+        need(isinstance(b["patches"], list), "patches must be ordered records")
+        patch_paths = []
+        for patch in b["patches"]:
+            self.hashed_file(patch)
+            patch_paths.append(patch["path"])
+        need(len(patch_paths) == len(set(patch_paths)), "duplicate patch path")
+        need(isinstance(b["inputs"], list), "inputs must be a list")
+        input_ids = set()
+        for item in b["inputs"]:
+            obj(item, {"id", "name", "sha256", "license", "redistributable"})
+            key = ident(item["id"])
+            need(key not in input_ids, "duplicate input id")
+            input_ids.add(key)
+            text(item["name"])
+            text(item["license"])
+            digest(item["sha256"])
+            need(type(item["redistributable"]) is bool, "expected redistribution boolean")
+        need(isinstance(b["artifacts"], list) and b["artifacts"], "artifacts required")
+        for artifact in b["artifacts"]:
+            obj(artifact, {"id", "name", "sha256", "size"})
+            key = ident(artifact["id"])
+            need(key not in self.artifacts, "duplicate artifact id")
+            text(artifact["name"])
+            digest(artifact["sha256"])
+            integer(artifact["size"], 1)
+            self.artifacts[key] = artifact["sha256"]
+        # Include source records, not merely their ids, so changing provenance invalidates runs.
+        self.build_digest = build_id({"build": b, "sources": [sources[ref] for ref in refs]})
+
+    def timestamp(self, value):
+        need(isinstance(value, str) and re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", value),
+            "timestamp must be UTC RFC3339 ending in Z")
+        return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+    def runs(self):
+        runs = {}
+        for path in sorted(self.files):
+            if not path.startswith(self.prefix + "evidence/") or not path.endswith(".json"):
+                continue
+            # Only evidence/run-*.json are run manifests. Other JSON files are hashed logs.
+            relative = path[len(self.prefix):]
+            if not re.fullmatch(r"evidence/run-[a-z0-9_.-]+\.json", relative):
+                continue
+            run = parse_json(self.files[path])
+            obj(run, {"schema_version", "id", "subject", "suite", "environment", "observer",
+                      "started_at", "ended_at", "results", "limitations", "redactions"})
+            need(type(run["schema_version"]) is int and run["schema_version"] == 1,
+                 "unsupported run schema")
+            rid = ident(run["id"])
+            need(relative == f"evidence/run-{rid}.json", "run filename must match id")
+            need(rid not in runs, "duplicate run id")
+            need(self.build_digest is not None, "run requires a build profile")
+            subject = obj(run["subject"], {"variant", "recipe_revision", "build_id", "artifacts"})
+            need(subject["variant"] in self.profile["build"]["variants"], "run variant mismatch")
+            need(subject["recipe_revision"] == self.profile["build"]["revision"],
+                 "recipe revision mismatch")
+            need(subject["build_id"] == self.build_digest, "stale build identity")
+            need(subject["artifacts"] == self.artifacts, "artifact set mismatch")
+            need(run["suite"] == {"id": "serverdroid-minimum", "version": "1"},
+                 "unknown test suite/version")
+            environment = obj(run["environment"], {"kind", "description"})
+            need(environment["kind"] in {"build", "hardware"}, "invalid environment kind")
+            text(environment["description"])
+            observer = obj(run["observer"], {"handle", "relationship"})
+            text(observer["handle"])
+            need(observer["relationship"] in {"owner", "independent"}, "invalid observer relationship")
+            start, end = self.timestamp(run["started_at"]), self.timestamp(run["ended_at"])
+            need(start <= end, "run time order")
+            strings(run["limitations"])
+            strings(run["redactions"])
+            need(isinstance(run["results"], list) and run["results"], "results required")
+            results = {}
+            for result in run["results"]:
+                obj(result, {"test_id", "command", "exit_code", "started_at", "ended_at", "log"})
+                tid = text(result["test_id"])
+                need(tid in TESTS, "unknown test id")
+                need(tid not in results, "duplicate test id in run")
+                text(result["command"])
+                integer(result["exit_code"])
+                a, z = self.timestamp(result["started_at"]), self.timestamp(result["ended_at"])
+                need(start <= a <= z <= end, "test outside run time interval")
+                self.hashed_file(result["log"])
+                log = parse_json(self.read(result["log"]["path"]))
+                obj(log, {"test_id", "measurements", "transcript"})
+                need(log["test_id"] == tid, "log test id mismatch")
+                text(log["transcript"])
+                passed = self.criteria(tid, log["measurements"], environment["kind"])
+                results[tid] = result["exit_code"] == 0 and passed
+            runs[rid] = {"results": results, "variant": subject["variant"],
+                         "kind": environment["kind"], "observer": observer["relationship"]}
+        return runs
+
+    def criteria(self, tid, m, kind):
+        if tid == "build.clean":
+            obj(m, {"clean_workspace", "outputs"})
+            need(type(m["clean_workspace"]) is bool, "expected clean-workspace boolean")
+            need(isinstance(m["outputs"], dict), "expected artifact hash map")
+            for key, value in m["outputs"].items():
+                ident(key)
+                digest(value)
+            return kind == "build" and m["clean_workspace"] and m["outputs"] == self.artifacts
+        if tid == "boot.userspace":
+            obj(m, {"machine", "kernel_release", "pid1", "root_mounted"})
+            text(m["machine"])
+            text(m["kernel_release"])
+            text(m["pid1"])
+            need(type(m["root_mounted"]) is bool, "expected mounted boolean")
+            return kind == "hardware" and m["machine"] == "aarch64" and m["root_mounted"]
+        if tid == "storage.roundtrip":
+            obj(m, {"filesystem", "writable", "readback_sha256"})
+            text(m["filesystem"])
+            need(type(m["writable"]) is bool, "expected writable boolean")
+            digest(m["readback_sha256"])
+            return kind == "hardware" and m["writable"] and m["readback_sha256"] == PROBE_SHA
+        obj(m, {"protocol", "attempted", "succeeded"})
+        text(m["protocol"])
+        integer(m["attempted"], 1)
+        integer(m["succeeded"])
+        need(m["succeeded"] <= m["attempted"], "impossible network counts")
+        return (kind == "hardware" and m["protocol"] == "ssh"
+                and m["attempted"] >= 3 and m["succeeded"] == m["attempted"])
+
+    def claims(self, claims, runs):
+        need(isinstance(claims, list), "claims must be a list")
+        seen = set()
+        supported = set()
+        for claim in claims:
+            obj(claim, {"capability", "state", "verification", "evidence"})
+            cap = claim["capability"]
+            need(cap in CAPABILITIES and cap not in seen, "unknown or duplicate capability")
+            seen.add(cap)
+            need(claim["state"] in {"proposed", "implemented", "not_tested", "blocked"},
+                 "invalid claim state")
+            verification = claim["verification"]
+            need(verification in VERIFICATIONS, "invalid verification provenance")
+            need(isinstance(claim["evidence"], list), "evidence must be a list")
+            if verification == "none":
+                need(not claim["evidence"], "unverified claim must not attach verification evidence")
+                continue
+            need(claim["state"] == "implemented" and claim["evidence"],
+                 "verified claim requires implemented state and evidence")
+            refs = set()
+            for ref in claim["evidence"]:
+                obj(ref, {"run", "test"})
+                rid, tid = ident(ref["run"]), text(ref["test"])
+                need((rid, tid) not in refs, "duplicate evidence reference")
+                refs.add((rid, tid))
+                need(rid in runs and tid in runs[rid]["results"], "missing evidence result")
+                run = runs[rid]
+                need(TESTS[tid] == cap, "test cannot substantiate this capability")
+                need(run["results"][tid], "test criteria did not pass")
+                if cap == "build":
+                    need(verification in {"build_verified", "reproduced"}, "build provenance mismatch")
+                else:
+                    need(verification in {"hardware_reported", "independently_hardware_verified"},
+                         "hardware provenance mismatch")
+                if verification in {"reproduced", "independently_hardware_verified"}:
+                    need(run["observer"] == "independent", "independent observer declaration required")
+                supported.add((run["variant"], cap))
+        return supported
+
+
+def validate(root):
+    files = scan(root)
+    for required in ("README.md", "AGENTS.md", "LICENSE", "docs/porting-playbook.md",
+                     "docs/evidence-protocol.md"):
+        need(required in files, "missing project contract")
+    # Check local Markdown file targets, not network availability or anchor spelling.
+    for path, data in files.items():
+        if not path.endswith(".md"):
+            continue
+        for target in re.findall(r"\[[^\]\n]+\]\(([^\s)]+)\)", data.decode("utf-8")):
+            if target.startswith(("https://", "http://", "mailto:", "#")):
+                continue
+            target = target.split("#", 1)[0]
+            need(not target.startswith("/"), "absolute Markdown link rejected")
+            # Resolve lexically against the scanned file registry, never follow filesystem links.
+            parts = list(PurePosixPath(path).parent.parts)
+            for part in target.split("/"):
+                if part == "..":
+                    need(bool(parts), "Markdown link escapes tree")
+                    parts.pop()
+                elif part and part != ".":
+                    parts.append(part)
+            need("/".join(parts) in files, "missing local Markdown target")
+    folders = {p.split("/")[1] for p in files if p.startswith("devices/")}
+    need("TEMPLATE" in folders, "missing device template")
+    devices = []
+    template = None
+    for folder in sorted(folders):
+        need(folder == "TEMPLATE" or ID.fullmatch(folder), "invalid device folder")
+        result = Device(files, folder).load()
+        if folder == "TEMPLATE":
+            template = "structurally valid; excluded from maturity"
+        else:
+            devices.append(result)
+    return {"validator_version": VERSION, "valid": True, "template": template,
+            "devices": devices, "screening": "partial; manual privacy/license review required"}
+
+
+PHYSICAL = [
+    "That the evidence came from a physical device: logs, digests and timestamps are not attestation.",
+    "That a build or a boot happened as described, and the stability, thermal and battery behaviour of the device.",
+    "That the recipe is valid for any variant listed under 'Not tested'.",
+    "Licences and redistribution rights of every source and input, and regional or hardware-revision differences.",
+    "Independence of an observer, and the levels Operational, Replicated and Maintained (never derived here).",
+    "Approval: it is the maintainer's decision, not a file.",
+]
+
+
+def render_text(result):
+    """The same facts as the JSON, in three sections that are never merged."""
+    out = []
+    if not result.get("valid"):
+        out += ["== (a) What the contributor claims", "   not read: the submission was rejected", "",
+                "== (b) What the tools demonstrate", f"   ERROR  {result.get('error', 'invalid')}", ""]
+    else:
+        out += ["== (a) What the contributor claims (read from the files, not checked as true)"]
+        for device in result["devices"] or []:
+            for claim in device["declared_claims"]:
+                out.append(f"   {device['device']}: {claim['capability']} state={claim['state']} "
+                           f"verification={claim['verification']}")
+        if not result["devices"]:
+            out.append("   no device submitted")
+        out += ["", "== (b) What the tools demonstrate",
+                f"   structure and consistency valid (validator {result['validator_version']}); template: {result['template']}"]
+        for device in result["devices"]:
+            out.append(f"   {device['device']}: build identity {device['build_id'] or 'none (research only)'}")
+            out.append("   levels derived per variant (from contributor-declared evidence that passed the known criteria; "
+                       "consistency, not attestation):")
+            for variant, level in sorted(device["maturity_by_variant"].items()):
+                out.append(f"     {variant}: {level}")
+            out.append(f"   recipe valid for: {device['recipe_valid_for'] or 'no variant yet'}; "
+                       f"Not tested: {device['not_tested'] or 'none'}")
+            if device["failed_results"]:
+                listing = ", ".join(f"{f['run']}/{f['test']} ({f['variant']})" for f in device["failed_results"])
+                out.append(f"   NOTE failed results exist for this build: {listing}. Read them before trusting a claim.")
+        out += [f"   screening: {result['screening']}", ""]
+    out += ["== (c) What still depends on physical or independent validation"]
+    out += [f"   - {line}" for line in PHYSICAL]
+    out += ["", "note: the screening is a partial barrier. A valid result is not 'safe'; the human review still reads the files."]
+    return "\n".join(out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True, help="candidate tree; treated as data")
+    parser.add_argument("--text", action="store_true", help="print the three-section report instead of JSON")
+    args = parser.parse_args()
+    try:
+        result = validate(args.root)
+    except (Invalid, OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+        # Never echo parser messages or untrusted file contents: they may contain secrets.
+        reason = str(error) if isinstance(error, Invalid) else "malformed or unreadable submission"
+        failure = {"validator_version": VERSION, "valid": False, "error": reason}
+        print(render_text(failure) if args.text else json.dumps(failure))
+        return 1
+    print(render_text(result) if args.text else json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

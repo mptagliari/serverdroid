@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-FileCopyrightText: 2026 Matheus Tagliari
+name: Validate device submissions
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'draft/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted validator revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          path: trusted
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Checkout candidate as data
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Require an established trusted validator
+        shell: bash
+        run: |
+          if [ ! -f trusted/tools/validate-submission ]; then
+            echo 'Bootstrap requires human review and local tests before the first merge.'
+            exit 1
+          fi
+      - name: Run trusted self-tests
+        run: python3 -I -B -m unittest discover -s trusted/tests -v
+      - name: Validate candidate data using trusted code
+        run: python3 -I -B trusted/tools/validate-submission --root candidate

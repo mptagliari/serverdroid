@@ -1,0 +1,10 @@
+# The paths whose change alters what the validator accepts or what agents are told to do: the maintainer must review them. This file takes effect
+# only when branch protection requires code-owner review, which GitHub offers for public repositories on the free plan (see docs/evidence-protocol.md).
+# Confirm the account before publication.
+/CODEOWNERS      @mptagliari
+/AGENTS.md       @mptagliari
+/LICENSING.md    @mptagliari
+/docs/           @mptagliari
+/tools/          @mptagliari
+/tests/          @mptagliari
+/.github/        @mptagliari

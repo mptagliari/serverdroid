@@ -1,0 +1,40 @@
+schema_version = 1
+
+[device]
+codename = "template"
+manufacturer = "Replace with manufacturer"
+model = "Replace with public model identifier"
+soc = "Unknown"
+variants = ["unidentified"]
+
+[[sources]]
+id = "research-reference"
+url = "https://example.org/replace-with-research-source"
+description = "Placeholder only; replace before contributing a real device."
+
+[research.bootloader]
+outcome = "unknown"
+summary = "Not investigated."
+sources = ["research-reference"]
+
+[research.kernel]
+outcome = "unknown"
+summary = "Not investigated."
+sources = ["research-reference"]
+
+[research.hardware_minimum]
+outcome = "unknown"
+summary = "Storage, network and power dependencies have not been investigated."
+sources = ["research-reference"]
+
+[safety]
+recovery = "RECOVERY.md"
+proposed_writes = []
+protected_partitions = []
+partition_sources = []
+
+[[claims]]
+capability = "boot"
+state = "not_tested"
+verification = "none"
+evidence = []

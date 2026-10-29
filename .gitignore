@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+# never commit images, firmware, dumps, keys or local configuration (the validator rejects them anyway)
+*.img
+*.bin
+*.ko
+*.zip
+*.tar*
+*.pem
+*.key
+id_*
+.env
+backup*/
