@@ -417,6 +417,21 @@ evidence = [{{run = "{rid}", test = "{tid}"}}]
         (self.dev / "script.sh").write_text("#!/bin/sh\nexit 0\n")
         self.reject("SPDX")
 
+    def test_c_source_with_spdx_accepted(self):
+        (self.dev / "probe.c").write_text(
+            "// SPDX-License-Identifier: GPL-3.0-only\nint main(void) { return 0; }\n")
+        (self.dev / "probe.h").write_text(
+            "// SPDX-License-Identifier: GPL-3.0-only\n#ifndef PROBE_H\n#define PROBE_H\n#endif\n")
+        self.validate()  # does not raise
+
+    def test_c_source_missing_spdx(self):
+        (self.dev / "probe.c").write_text("int main(void) { return 0; }\n")
+        self.reject("SPDX")
+
+    def test_h_header_missing_spdx(self):
+        (self.dev / "probe.h").write_text("#ifndef PROBE_H\n#define PROBE_H\n#endif\n")
+        self.reject("SPDX")
+
     def test_duplicate_json_key(self):
         self.build_claim()
         path = self.dev / "evidence/run-owner.json"

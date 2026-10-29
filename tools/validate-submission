@@ -15,7 +15,7 @@ import sys
 import tomllib
 from urllib.parse import urlsplit
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 MAX_FILE = 1024 * 1024
 MAX_TOTAL = 10 * MAX_FILE
 MAX_FILES = 1000
@@ -25,7 +25,7 @@ REV = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 ID = re.compile(r"[a-z][a-z0-9_.-]{0,79}\Z")
 NAME = re.compile(r"[A-Za-z0-9_.-]{1,120}\Z")
 EXTENSIONS = {".md", ".toml", ".json", ".py", ".sh", ".yml", ".yaml",
-              ".txt", ".patch", ".diff", ".config", ".env"}
+              ".txt", ".patch", ".diff", ".config", ".env", ".c", ".h"}
 CAPABILITIES = {"build", "boot", "storage", "network", "power", "stability"}
 TESTS = {"build.clean": "build", "boot.userspace": "boot",
          "storage.roundtrip": "storage", "network.ssh": "network"}
@@ -182,9 +182,9 @@ def scan(root):
                 need(not any(luhn(m.group()) for m in
                              re.finditer(r"(?<!\d)\d{15}(?!\d)", content)),
                      "potential IMEI; inspect locally")
-                if path.suffix in {".py", ".sh"} or entry.name == "validate-submission":
+                if path.suffix in {".py", ".sh", ".c", ".h"} or entry.name == "validate-submission":
                     need(any("SPDX-License-Identifier:" in line for line in
-                             content.splitlines()[:5]), "script requires an SPDX header")
+                             content.splitlines()[:5]), "script or source file requires an SPDX header")
                 files[rel] = data
     walk(root, 0)
     return files

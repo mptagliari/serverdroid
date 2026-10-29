@@ -1,7 +1,7 @@
 # Evidence protocol v1
 
 Status: draft. Python 3.11+ and the standard library are sufficient.
-The executable schema is `tools/validate-submission` version 1.1.0 (1.1.0 adds the text report, the list of failed results and `recipe_valid_for`; the schema is that of 1.0.0); unknown fields,
+The executable schema is `tools/validate-submission` version 1.1.1 (1.1.0 adds the text report, the list of failed results and `recipe_valid_for`; 1.1.1 accepts `.c`/`.h` source files, under the same SPDX-header rule as scripts; the schema is that of 1.0.0); unknown fields,
 duplicate identifiers and JSON keys are errors. Schema evolution requires a
 versioned change and migration, not reinterpretation of old evidence.
 
@@ -204,7 +204,7 @@ It rejects symlinks, hard links, special files, unsafe filenames, path traversal
 unknown file extensions, common binary signatures, NUL/control bytes and non-UTF-8.
 No binary exceptions exist in v1. Bounds: 1 MiB/file, 10 MiB/tree, 1,000 files,
 2,000 entries, 12 directory levels; the root `.git` directory alone is skipped.
-Scripts need an SPDX header in the first five lines; presence is not license
+Scripts and `.c`/`.h` source files need an SPDX header in the first five lines; presence is not license
 validation. Candidate trees should be immutable snapshots while scanned.
 
 Screening flags some private keys, common token forms, public SSH keys, MACs,
