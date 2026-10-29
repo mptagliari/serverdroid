@@ -1,0 +1,238 @@
+From 83a947ce804794f3bce918776c497a6d97c67f94 Mon Sep 17 00:00:00 2001
+From: Matheus Tagliari <160161347+mptagliari@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 20:25:21 -0300
+Subject: [PATCH] power: supply: add the MT6359P fuel gauge (battery current
+ and charge counter)
+
+Expose the FGADC block of the MT6359P as a power supply, read with the
+vendor's latch handshake (SW_READ_PRE, LATCHDATA_ST, SW_CLEAR). Instantiated
+as an MFD cell from the PMIC node (mediatek,mt6359-fg).
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   |   5 +
+ drivers/mfd/mt6397-core.c                     |   4 +
+ drivers/power/supply/Kconfig                  |   7 +
+ drivers/power/supply/Makefile                 |   1 +
+ drivers/power/supply/mt6359_fg.c              | 150 ++++++++++++++++++
+ 5 files changed, 167 insertions(+)
+ create mode 100644 drivers/power/supply/mt6359_fg.c
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 5e371e769..e6f002ae3 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -1155,6 +1155,11 @@ pmic_adc: adc {
+ 		compatible = "mediatek,mt6359-auxadc";
+ 		#io-channel-cells = <1>;
+ 	};
++
++	/* Fuel gauge block (FGADC): battery current and charge counter */
++	fuel-gauge {
++		compatible = "mediatek,mt6359-fg";
++	};
+ };
+ 
+ &mt6359 {
+diff --git a/drivers/mfd/mt6397-core.c b/drivers/mfd/mt6397-core.c
+index 1bdacda9a..0b5229998 100644
+--- a/drivers/mfd/mt6397-core.c
++++ b/drivers/mfd/mt6397-core.c
+@@ -232,6 +232,10 @@ static const struct mfd_cell mt6359_devs[] = {
+ 		.of_compatible = "mediatek,mt6359-auxadc"
+ 	},
+ 	{ .name = "mt6359-regulator", },
++	{
++		.name = "mt6359-fg",
++		.of_compatible = "mediatek,mt6359-fg"
++	},
+ 	{
+ 		.name = "mt6359-rtc",
+ 		.num_resources = ARRAY_SIZE(mt6358_rtc_resources),
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 8f91d1b20..d8f3e5612 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -713,6 +713,13 @@ config CHARGER_MP2629
+ 	  Battery charger. This driver provides Battery charger power management
+ 	  functions on the systems.
+ 
++config BATTERY_MT6359_FG
++	tristate "MediaTek MT6359P fuel gauge"
++	depends on MFD_MT6397
++	help
++	  Say Y to expose the battery current and the charge counter of the
++	  MT6359P PMIC's fuel gauge (FGADC) as a power supply.
++
+ config CHARGER_MT6360
+ 	tristate "Mediatek MT6360 Charger Driver"
+ 	depends on MFD_MT6360
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index 168152a38..8fb2c1150 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -93,6 +93,7 @@ obj-$(CONFIG_CHARGER_MAX8971)	+= max8971_charger.o
+ obj-$(CONFIG_CHARGER_MAX8997)	+= max8997_charger.o
+ obj-$(CONFIG_CHARGER_MAX8998)	+= max8998_charger.o
+ obj-$(CONFIG_CHARGER_MP2629)	+= mp2629_charger.o
++obj-$(CONFIG_BATTERY_MT6359_FG)	+= mt6359_fg.o
+ obj-$(CONFIG_CHARGER_MT6360)	+= mt6360_charger.o
+ obj-$(CONFIG_CHARGER_MT6370)	+= mt6370-charger.o
+ obj-$(CONFIG_CHARGER_QCOM_SMBB)	+= qcom_smbb.o
+diff --git a/drivers/power/supply/mt6359_fg.c b/drivers/power/supply/mt6359_fg.c
+new file mode 100644
+index 000000000..d94c67e76
+--- /dev/null
++++ b/drivers/power/supply/mt6359_fg.c
+@@ -0,0 +1,150 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * MediaTek MT6359P fuel gauge: battery current and charge counter as a power supply.
++ *
++ * The coulomb counter (CAR) and the battery current live in a latched copy of the FGADC block: set SW_READ_PRE, wait for LATCHDATA_ST, read,
++ * set SW_CLEAR, clear SW_READ_PRE, wait for LATCHDATA_ST to drop, clear SW_CLEAR (the vendor sequence of mt6359_gauge.c). Reading the
++ * registers without it returns a stale copy. The gauge runs from reset; this driver only reads it. The battery voltage and temperature come
++ * from the AUXADC (mt6359-auxadc), and the state of charge is an estimate left to user space.
++ *
++ * Scales (checked against the vendor kernel and, while charging, against the MT6360 battery-current ADC): 0.610352 mA per count of the
++ * current register and 0.085 uAh per count of CAR, both times the vendor's CAR_TUNE of 0.99.
++ */
++#include <linux/bits.h>
++#include <linux/delay.h>
++#include <linux/math64.h>
++#include <linux/mfd/mt6397/core.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/platform_device.h>
++#include <linux/property.h>
++#include <linux/power_supply.h>
++#include <linux/regmap.h>
++
++#define MT6359_FGADC_CON1	0xd0a
++#define  FG_SW_READ_PRE		BIT(0)
++#define  FG_SW_CLEAR		BIT(3)
++#define  FG_LATCHDATA_ST	BIT(15)
++#define MT6359_FGADC_CAR_CON0	0xd16	/* CAR[15:0] */
++#define MT6359_FGADC_CAR_CON1	0xd18	/* CAR[31:16] */
++#define MT6359_FGADC_CUR_CON0	0xd8a	/* signed 16 bit, positive = charging */
++
++#define FG_LATCH_TRIES		1000
++
++struct mt6359_fg {
++	struct regmap *regmap;
++	struct mutex lock;	/* the latch handshake is not reentrant */
++};
++
++static int mt6359_fg_wait_latch(struct mt6359_fg *fg, bool set)
++{
++	unsigned int val;
++	int i, ret;
++
++	for (i = 0; i < FG_LATCH_TRIES; i++) {
++		ret = regmap_read(fg->regmap, MT6359_FGADC_CON1, &val);
++		if (ret)
++			return ret;
++		if (!!(val & FG_LATCHDATA_ST) == set)
++			return 0;
++		usleep_range(50, 100);
++	}
++	return -ETIMEDOUT;
++}
++
++/* One latched snapshot: the current register (s16) and the coulomb counter (s32). */
++static int mt6359_fg_snapshot(struct mt6359_fg *fg, int *cur_raw, s32 *car_raw)
++{
++	unsigned int cur, lo, hi;
++	int ret, ret2;
++
++	regmap_update_bits(fg->regmap, MT6359_FGADC_CON1, FG_SW_READ_PRE, FG_SW_READ_PRE);
++	ret = mt6359_fg_wait_latch(fg, true);
++	if (!ret) {
++		regmap_read(fg->regmap, MT6359_FGADC_CUR_CON0, &cur);
++		regmap_read(fg->regmap, MT6359_FGADC_CAR_CON0, &lo);
++		regmap_read(fg->regmap, MT6359_FGADC_CAR_CON1, &hi);
++		*cur_raw = (s16)cur;
++		*car_raw = (s32)((hi << 16) | (lo & 0xffff));
++	}
++	regmap_update_bits(fg->regmap, MT6359_FGADC_CON1, FG_SW_CLEAR, FG_SW_CLEAR);
++	regmap_update_bits(fg->regmap, MT6359_FGADC_CON1, FG_SW_READ_PRE, 0);
++	ret2 = mt6359_fg_wait_latch(fg, false);
++	regmap_update_bits(fg->regmap, MT6359_FGADC_CON1, FG_SW_CLEAR, 0);
++	return ret ?: ret2;
++}
++
++static int mt6359_fg_get_property(struct power_supply *psy, enum power_supply_property psp,
++				  union power_supply_propval *val)
++{
++	struct mt6359_fg *fg = power_supply_get_drvdata(psy);
++	int cur, ret;
++	s32 car;
++
++	mutex_lock(&fg->lock);
++	ret = mt6359_fg_snapshot(fg, &cur, &car);
++	mutex_unlock(&fg->lock);
++	if (ret)
++		return ret;
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_CURRENT_NOW:	/* uA, negative while discharging */
++		val->intval = div_s64((s64)cur * 610352 * 99, 100000);
++		return 0;
++	case POWER_SUPPLY_PROP_CHARGE_COUNTER:	/* uAh since the counter was last reset */
++		val->intval = div_s64((s64)car * 85 * 99, 100 * 1000);
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static const enum power_supply_property mt6359_fg_props[] = {
++	POWER_SUPPLY_PROP_CURRENT_NOW,
++	POWER_SUPPLY_PROP_CHARGE_COUNTER,
++};
++
++static const struct power_supply_desc mt6359_fg_desc = {
++	.name = "mt6359-fg",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = mt6359_fg_props,
++	.num_properties = ARRAY_SIZE(mt6359_fg_props),
++	.get_property = mt6359_fg_get_property,
++};
++
++static int mt6359_fg_probe(struct platform_device *pdev)
++{
++	struct power_supply_config cfg = {};
++	struct power_supply *psy;
++	struct mt6397_chip *chip = dev_get_drvdata(pdev->dev.parent);
++	struct mt6359_fg *fg;
++
++	fg = devm_kzalloc(&pdev->dev, sizeof(*fg), GFP_KERNEL);
++	if (!fg)
++		return -ENOMEM;
++	fg->regmap = chip->regmap;
++	devm_mutex_init(&pdev->dev, &fg->lock);
++
++	cfg.drv_data = fg;
++	cfg.fwnode = dev_fwnode(&pdev->dev);
++	psy = devm_power_supply_register(&pdev->dev, &mt6359_fg_desc, &cfg);
++	return PTR_ERR_OR_ZERO(psy);
++}
++
++static const struct of_device_id mt6359_fg_of_match[] = {
++	{ .compatible = "mediatek,mt6359-fg" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, mt6359_fg_of_match);
++
++static struct platform_driver mt6359_fg_driver = {
++	.driver = {
++		.name = "mt6359-fg",
++		.of_match_table = mt6359_fg_of_match,
++	},
++	.probe = mt6359_fg_probe,
++};
++module_platform_driver(mt6359_fg_driver);
++
++MODULE_DESCRIPTION("MediaTek MT6359P fuel gauge (battery current and charge counter)");
++MODULE_LICENSE("GPL");
+-- 
+2.47.3
+

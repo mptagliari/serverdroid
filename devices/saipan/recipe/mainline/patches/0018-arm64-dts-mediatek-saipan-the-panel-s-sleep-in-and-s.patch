@@ -1,0 +1,35 @@
+From fbdde2599543ce9539ebbc865853418c501622dc Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 20:55:23 -0300
+Subject: [PATCH 18/18] arm64: dts: mediatek: saipan: the panel's sleep-in and
+ sleep-out commands
+
+---
+ .../boot/dts/mediatek/mt6833-motorola-saipan.dts      | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 93235eef6..36676255f 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -1045,6 +1045,17 @@ backlight: backlight@14013000 {
+ 		mediatek,dcs-brightness-12bit;
+ 		mediatek,skip-initial-write;
+ 		default-brightness-level = <127>;
++		/*
++		 * Panel sleep (stage M24), the vendor driver's commands: sleep in = 0x26 0x08, 0x28 (display
++		 * off), 0x10 (sleep in), 100 ms; sleep out = 0x11, 120 ms, 0x29 (display on), 0x26 0x01.
++		 * The vendor kernel also cuts the panel bias and resets it; that is not done here, so the
++		 * panel keeps its registers and only sleeps. Used when the backlight's bl_power is blanked.
++		 */
++		mediatek,sleep-in = /bits/ 8 <2 0x26 0x08  1 0x28  1 0x10>;
++		mediatek,sleep-in-delay-ms = <100>;
++		mediatek,sleep-out = /bits/ 8 <1 0x11>;
++		mediatek,sleep-out-delay-ms = <120>;
++		mediatek,sleep-out-then = /bits/ 8 <1 0x29  2 0x26 0x01>;
+ 	};
+ };
+ 
+-- 
+2.47.3
+

@@ -1,0 +1,117 @@
+From 8ae11e26939da8ff3bc6c315dacb7a9158d09593 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 20:07:58 -0300
+Subject: [PATCH 13/18] backlight: mtk_dsi_vm: support 12-bit two-parameter DCS
+ brightness and skipping the boot-time write
+
+---
+ drivers/video/backlight/mtk_dsi_vm_bl.c | 46 ++++++++++++++++++++++---
+ 1 file changed, 41 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/video/backlight/mtk_dsi_vm_bl.c b/drivers/video/backlight/mtk_dsi_vm_bl.c
+index 96d441928..ee86a812e 100644
+--- a/drivers/video/backlight/mtk_dsi_vm_bl.c
++++ b/drivers/video/backlight/mtk_dsi_vm_bl.c
+@@ -25,11 +25,14 @@
+ #define DSI_INTSTA		0x00c
+ #define VM_CMD_DONE		BIT(5)
+ #define DSI_VM_CMD_CON		0x130
++#define DSI_VM_CMD_DATA0	0x134
+ #define VM_CMD_EN		BIT(0)
++#define VM_CMD_LONG_PKT		BIT(1)
+ #define VM_CMD_HSTX		BIT(3)
+ #define VM_CMD_TS_VFP_EN	BIT(5)
+ 
+ #define MIPI_DCS_SHORT_WRITE_PARAM	0x15
++#define MIPI_DCS_LONG_WRITE		0x39
+ #define DCS_SET_DISPLAY_BRIGHTNESS	0x51
+ #define DCS_WRITE_CONTROL_DISPLAY	0x53
+ 
+@@ -37,19 +40,34 @@ struct mtk_dsi_vm_bl {
+ 	void __iomem *regs;
+ 	struct mutex lock;
+ 	bool hs;
++	bool wide;		/* 12-bit brightness: DCS 0x51 with two parameters (long write) */
++	unsigned int max;	/* sysfs maximum */
+ };
+ 
+-static int mtk_dsi_vm_bl_send(struct mtk_dsi_vm_bl *bl, u8 cmd, u8 param)
++/*
++ * One DCS command through the video-mode command engine. Short form: command and one parameter in
++ * the control word. Long form (three payload bytes: command and two parameters): the payload goes
++ * to DSI_VM_CMD_DATA0 and the control word carries the word count and the 0x39 data type, as the
++ * vendor kernel's mtk_dsi_vm_cmdq() does for messages longer than two bytes.
++ */
++static int mtk_dsi_vm_bl_send3(struct mtk_dsi_vm_bl *bl, u8 cmd, u8 p0, u8 p1, bool lng)
+ {
+ 	u32 val;
+ 	int ret;
+ 
+-	val = (param << 24) | (cmd << 16) | (MIPI_DCS_SHORT_WRITE_PARAM << 8) |
+-	      VM_CMD_EN | VM_CMD_TS_VFP_EN;
++	if (lng) {
++		val = (3 << 16) | (MIPI_DCS_LONG_WRITE << 8) | VM_CMD_LONG_PKT |
++		      VM_CMD_EN | VM_CMD_TS_VFP_EN;
++	} else {
++		val = (p0 << 24) | (cmd << 16) | (MIPI_DCS_SHORT_WRITE_PARAM << 8) |
++		      VM_CMD_EN | VM_CMD_TS_VFP_EN;
++	}
+ 	if (bl->hs)
+ 		val |= VM_CMD_HSTX;
+ 
+ 	mutex_lock(&bl->lock);
++	if (lng)
++		writel(cmd | (p0 << 8) | (p1 << 16), bl->regs + DSI_VM_CMD_DATA0);
+ 	writel(val, bl->regs + DSI_VM_CMD_CON);
+ 	writel(readl(bl->regs + DSI_INTSTA) & ~VM_CMD_DONE, bl->regs + DSI_INTSTA);
+ 	writel(readl(bl->regs + DSI_START) & ~VM_CMD_START, bl->regs + DSI_START);
+@@ -62,12 +80,24 @@ static int mtk_dsi_vm_bl_send(struct mtk_dsi_vm_bl *bl, u8 cmd, u8 param)
+ 	return ret;
+ }
+ 
++static int mtk_dsi_vm_bl_send(struct mtk_dsi_vm_bl *bl, u8 cmd, u8 param)
++{
++	return mtk_dsi_vm_bl_send3(bl, cmd, param, 0, false);
++}
++
+ static int mtk_dsi_vm_bl_update_status(struct backlight_device *bd)
+ {
+ 	struct mtk_dsi_vm_bl *bl = bl_get_data(bd);
++	int level = backlight_get_brightness(bd);
+ 
+-	return mtk_dsi_vm_bl_send(bl, DCS_SET_DISPLAY_BRIGHTNESS,
+-				  backlight_get_brightness(bd));
++	if (bl->wide) {
++		/* sysfs 0..max to the panel's 12-bit DBV 0..4095 */
++		unsigned int dbv = DIV_ROUND_CLOSEST(level * 4095, bl->max);
++
++		return mtk_dsi_vm_bl_send3(bl, DCS_SET_DISPLAY_BRIGHTNESS, (dbv >> 8) & 0xf,
++					   dbv & 0xff, true);
++	}
++	return mtk_dsi_vm_bl_send(bl, DCS_SET_DISPLAY_BRIGHTNESS, level);
+ }
+ 
+ static const struct backlight_ops mtk_dsi_vm_bl_ops = {
+@@ -107,6 +137,9 @@ static int mtk_dsi_vm_bl_probe(struct platform_device *pdev)
+ 			     &props.brightness);
+ 	if (!of_property_read_u32(dev->of_node, "max-brightness", &val))
+ 		props.max_brightness = val;
++	bl->max = props.max_brightness;
++	/* 12-bit panels (vendor: max_bl_level 4095): DCS 0x51 takes two parameters */
++	bl->wide = of_property_read_bool(dev->of_node, "mediatek,dcs-brightness-12bit");
+ 
+ 	/*
+ 	 * Some panels (e.g. the SM-A226B Himax TDDI) only drive their LED PWM
+@@ -126,6 +159,9 @@ static int mtk_dsi_vm_bl_probe(struct platform_device *pdev)
+ 		return PTR_ERR(bd);
+ 
+ 	platform_set_drvdata(pdev, bd);
++	/* Leave the bootloader's brightness alone until user space writes one. */
++	if (of_property_read_bool(dev->of_node, "mediatek,skip-initial-write"))
++		return 0;
+ 	return backlight_update_status(bd);
+ }
+ 
+-- 
+2.47.3
+

@@ -1,0 +1,112 @@
+From 86299b32e003b8422fda9fe5766bc02a1848422e Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 19:16:36 -0300
+Subject: [PATCH 11/18] arm64: dts: mediatek: saipan: CPU operating points up
+ to the table tops (2000 and 2203 MHz)
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 74 ++++++++++++++++++-
+ 1 file changed, 70 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index e9cae0e26..1fd8dddcd 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -633,10 +633,11 @@ mt6359_vsram_proc1_ldo_reg: ldo_vsram_proc1 {
+ };
+ 
+ /*
+- * CPU and CCI frequency scaling (stage M7). Tables and supplies copied from the a22x file (same SoC,
+- * MediaTek nominal voltage/frequency curve); the top operating points are capped for the first test:
+- * little cluster up to 1500 MHz (850 mV), big cluster up to 1650 MHz (900 mV). The caps are a first-test
+- * choice, not a measured limit. Voltages are not checked against the Motorola per-chip values.
++ * CPU and CCI frequency scaling (stages M7, M19). Tables and supplies copied from the a22x file (same
++ * SoC, MediaTek nominal voltage/frequency curve). The first test capped the top operating points;
++ * the caps were raised in three steps with a result-comparison stress at each (docs/mainline-port-
++ * plan.md 4o) up to the top of the tables: little cluster 2000 MHz (1000 mV), big cluster 2203 MHz
++ * (900 mV). Voltages are not checked against the Motorola per-chip values.
+  */
+ / {
+ 	mcusys: syscon@c53a000 {
+@@ -774,6 +775,31 @@ opp-1500000000 {
+ 			opp-microvolt = <850000>;
+ 			required-opps = <&cci_opp_750>;
+ 		};
++		opp-1645000000 {
++			opp-hz = /bits/ 64 <1645000000>;
++			opp-microvolt = <893750>;
++			required-opps = <&cci_opp_825>;
++		};
++		opp-1750000000 {
++			opp-hz = /bits/ 64 <1750000000>;
++			opp-microvolt = <925000>;
++			required-opps = <&cci_opp_900>;
++		};
++		opp-1812000000 {
++			opp-hz = /bits/ 64 <1812000000>;
++			opp-microvolt = <943750>;
++			required-opps = <&cci_opp_900>;
++		};
++		opp-1916000000 {
++			opp-hz = /bits/ 64 <1916000000>;
++			opp-microvolt = <975000>;
++			required-opps = <&cci_opp_975>;
++		};
++		opp-2000000000 {
++			opp-hz = /bits/ 64 <2000000000>;
++			opp-microvolt = <1000000>;
++			required-opps = <&cci_opp_975>;
++		};
+ 	};
+ 
+ 	cluster1_opp: opp-table-cluster1 {
+@@ -829,6 +855,46 @@ opp-1650000000 {
+ 			opp-microvolt = <900000>;
+ 			required-opps = <&cci_opp_825>;
+ 		};
++		opp-1720000000 {
++			opp-hz = /bits/ 64 <1720000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_825>;
++		};
++		opp-1790000000 {
++			opp-hz = /bits/ 64 <1790000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_900>;
++		};
++		opp-1836000000 {
++			opp-hz = /bits/ 64 <1836000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_900>;
++		};
++		opp-1906000000 {
++			opp-hz = /bits/ 64 <1906000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_975>;
++		};
++		opp-1953000000 {
++			opp-hz = /bits/ 64 <1953000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_975>;
++		};
++		opp-2000000000 {
++			opp-hz = /bits/ 64 <2000000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_975>;
++		};
++		opp-2087000000 {
++			opp-hz = /bits/ 64 <2087000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_1050>;
++		};
++		opp-2203000000 {
++			opp-hz = /bits/ 64 <2203000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_1131>;
++		};
+ 	};
+ };
+ 
+-- 
+2.47.3
+

@@ -1,0 +1,365 @@
+From 4da7cc06a6a1ffc676edc91465c43b39ce0d8b71 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 16:36:08 -0300
+Subject: [PATCH 07/18] arm64: dts: mediatek: saipan: CPU and CCI frequency
+ scaling with capped first-test OPPs
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 317 +++++++++++++++++-
+ 1 file changed, 309 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index eb7312464..5e333baaa 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -447,8 +447,11 @@ buck_vs1 {
+ 					regulator-always-on;
+ 				};
+ 
+-				buck_vgpu11 {
+-					regulator-name = "vgpu11";
++				mt6359_vgpu11_buck_reg: buck_vgpu11 {
++					regulator-name = "vproc_big";
++					regulator-min-microvolt = <600000>;
++					regulator-max-microvolt = <1000000>;
++					regulator-ramp-delay = <5000>;
+ 					regulator-always-on;
+ 				};
+ 
+@@ -467,8 +470,11 @@ buck_vs2 {
+ 					regulator-always-on;
+ 				};
+ 
+-				buck_vproc2 {
+-					regulator-name = "vproc2";
++				mt6359_vproc2_buck_reg: buck_vproc2 {
++					regulator-name = "vproc_little";
++					regulator-min-microvolt = <600000>;
++					regulator-max-microvolt = <1000000>;
++					regulator-ramp-delay = <5000>;
+ 					regulator-always-on;
+ 				};
+ 
+@@ -492,8 +498,11 @@ ldo_vusb {
+ 					regulator-always-on;
+ 				};
+ 
+-				ldo_vsram_proc2 {
+-					regulator-name = "vsram_proc2";
++				mt6359_vsram_proc2_ldo_reg: ldo_vsram_proc2 {
++					regulator-name = "vsram_little";
++					regulator-min-microvolt = <750000>;
++					regulator-max-microvolt = <1000000>;
++					regulator-ramp-delay = <5000>;
+ 					regulator-always-on;
+ 				};
+ 
+@@ -557,11 +566,303 @@ ldo_vm18 {
+ 					regulator-always-on;
+ 				};
+ 
+-				ldo_vsram_proc1 {
+-					regulator-name = "vsram_proc1";
++				mt6359_vsram_proc1_ldo_reg: ldo_vsram_proc1 {
++					regulator-name = "vsram_big";
++					regulator-min-microvolt = <750000>;
++					regulator-max-microvolt = <1000000>;
++					regulator-ramp-delay = <5000>;
+ 					regulator-always-on;
+ 				};
+ 			};
+ 		};
+ 	};
+ };
++
++/*
++ * CPU and CCI frequency scaling (stage M7). Tables and supplies copied from the a22x file (same SoC,
++ * MediaTek nominal voltage/frequency curve); the top operating points are capped for the first test:
++ * little cluster up to 1500 MHz (850 mV), big cluster up to 1650 MHz (900 mV). The caps are a first-test
++ * choice, not a measured limit. Voltages are not checked against the Motorola per-chip values.
++ */
++/ {
++	mcusys: syscon@c53a000 {
++		compatible = "mediatek,mt6833-mcusys", "syscon";
++		reg = <0 0x0c53a000 0 0x1000>;
++		#clock-cells = <1>;
++	};
++
++	cci: cci {
++		compatible = "mediatek,mt6833-cci";
++		clocks = <&mcusys CLK_MCU_ARMPLL_BUS_SEL>, <&clk26m>;
++		clock-names = "cci", "intermediate";
++		operating-points-v2 = <&cci_opp>;
++		proc-supply = <&mt6359_vproc2_buck_reg>;
++		sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++	};
++
++	cci_opp: opp-table-cci {
++		compatible = "operating-points-v2";
++		opp-shared;
++
++		cci_opp_450: opp-450000000 {
++			opp-hz = /bits/ 64 <450000000>;
++			opp-microvolt = <650000>;
++		};
++
++		cci_opp_506: opp-506000000 {
++			opp-hz = /bits/ 64 <506000000>;
++			opp-microvolt = <668750>;
++		};
++
++		cci_opp_562: opp-562000000 {
++			opp-hz = /bits/ 64 <562000000>;
++			opp-microvolt = <687500>;
++		};
++
++		cci_opp_618: opp-618000000 {
++			opp-hz = /bits/ 64 <618000000>;
++			opp-microvolt = <706250>;
++		};
++
++		cci_opp_675: opp-675000000 {
++			opp-hz = /bits/ 64 <675000000>;
++			opp-microvolt = <725000>;
++		};
++
++		cci_opp_750: opp-750000000 {
++			opp-hz = /bits/ 64 <750000000>;
++			opp-microvolt = <750000>;
++		};
++
++		cci_opp_825: opp-825000000 {
++			opp-hz = /bits/ 64 <825000000>;
++			opp-microvolt = <775000>;
++		};
++
++		cci_opp_900: opp-900000000 {
++			opp-hz = /bits/ 64 <900000000>;
++			opp-microvolt = <800000>;
++		};
++
++		cci_opp_975: opp-975000000 {
++			opp-hz = /bits/ 64 <975000000>;
++			opp-microvolt = <825000>;
++		};
++
++		cci_opp_1050: opp-1050000000 {
++			phandle = <0xf132>;
++			opp-hz = /bits/ 64 <1050000000>;
++			opp-microvolt = <850000>;
++		};
++
++		cci_opp_1131: opp-1131000000 {
++			phandle = <0xf133>;
++			opp-hz = /bits/ 64 <1131000000>;
++			opp-microvolt = <875000>;
++		};
++	};
++
++	cluster0_opp: opp-table-cluster0 {
++		compatible = "operating-points-v2";
++		opp-shared;
++		opp-500000000 {
++			opp-hz = /bits/ 64 <500000000>;
++			opp-microvolt = <650000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-620000000 {
++			opp-hz = /bits/ 64 <620000000>;
++			opp-microvolt = <650000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-675000000 {
++			opp-hz = /bits/ 64 <675000000>;
++			opp-microvolt = <662500>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-730000000 {
++			opp-hz = /bits/ 64 <730000000>;
++			opp-microvolt = <675000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-840000000 {
++			opp-hz = /bits/ 64 <840000000>;
++			opp-microvolt = <700000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-950000000 {
++			opp-hz = /bits/ 64 <950000000>;
++			opp-microvolt = <725000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-1032000000 {
++			opp-hz = /bits/ 64 <1032000000>;
++			opp-microvolt = <743750>;
++			required-opps = <&cci_opp_506>;
++		};
++		opp-1115000000 {
++			opp-hz = /bits/ 64 <1115000000>;
++			opp-microvolt = <762500>;
++			required-opps = <&cci_opp_562>;
++		};
++		opp-1280000000 {
++			opp-hz = /bits/ 64 <1280000000>;
++			opp-microvolt = <800000>;
++			required-opps = <&cci_opp_618>;
++		};
++		opp-1390000000 {
++			opp-hz = /bits/ 64 <1390000000>;
++			opp-microvolt = <825000>;
++			required-opps = <&cci_opp_675>;
++		};
++		opp-1500000000 {
++			opp-hz = /bits/ 64 <1500000000>;
++			opp-microvolt = <850000>;
++			required-opps = <&cci_opp_750>;
++		};
++	};
++
++	cluster1_opp: opp-table-cluster1 {
++		compatible = "operating-points-v2";
++		opp-shared;
++		opp-725000000 {
++			opp-hz = /bits/ 64 <725000000>;
++			opp-microvolt = <650000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-840000000 {
++			opp-hz = /bits/ 64 <840000000>;
++			opp-microvolt = <681250>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-898000000 {
++			opp-hz = /bits/ 64 <898000000>;
++			opp-microvolt = <700000>;
++			required-opps = <&cci_opp_450>;
++		};
++		opp-985000000 {
++			opp-hz = /bits/ 64 <985000000>;
++			opp-microvolt = <725000>;
++			required-opps = <&cci_opp_506>;
++		};
++		opp-1042000000 {
++			opp-hz = /bits/ 64 <1042000000>;
++			opp-microvolt = <737500>;
++			required-opps = <&cci_opp_506>;
++		};
++		opp-1129000000 {
++			opp-hz = /bits/ 64 <1129000000>;
++			opp-microvolt = <756250>;
++			required-opps = <&cci_opp_562>;
++		};
++		opp-1274000000 {
++			opp-hz = /bits/ 64 <1274000000>;
++			opp-microvolt = <800000>;
++			required-opps = <&cci_opp_618>;
++		};
++		opp-1418000000 {
++			opp-hz = /bits/ 64 <1418000000>;
++			opp-microvolt = <843750>;
++			required-opps = <&cci_opp_675>;
++		};
++		opp-1534000000 {
++			opp-hz = /bits/ 64 <1534000000>;
++			opp-microvolt = <875000>;
++			required-opps = <&cci_opp_750>;
++		};
++		opp-1650000000 {
++			opp-hz = /bits/ 64 <1650000000>;
++			opp-microvolt = <900000>;
++			required-opps = <&cci_opp_825>;
++		};
++	};
++};
++
++&cpu0 {
++	capacity-dmips-mhz = <383>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_LL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster0_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vproc2_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++};
++
++&cpu1 {
++	capacity-dmips-mhz = <383>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_LL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster0_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vproc2_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++};
++
++&cpu2 {
++	capacity-dmips-mhz = <383>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_LL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster0_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vproc2_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++};
++
++&cpu3 {
++	capacity-dmips-mhz = <383>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_LL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster0_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vproc2_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++};
++
++&cpu4 {
++	capacity-dmips-mhz = <383>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_LL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster0_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vproc2_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++};
++
++&cpu5 {
++	capacity-dmips-mhz = <383>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_LL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster0_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vproc2_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc2_ldo_reg>;
++};
++
++&cpu6 {
++	capacity-dmips-mhz = <1024>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_BL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster1_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vgpu11_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc1_ldo_reg>;
++};
++
++&cpu7 {
++	capacity-dmips-mhz = <1024>;
++	clocks = <&mcusys CLK_MCU_ARMPLL_BL_SEL>, <&clk26m>;
++	clock-names = "cpu", "intermediate";
++	operating-points-v2 = <&cluster1_opp>;
++	#cooling-cells = <2>;
++	mediatek,cci = <&cci>;
++	proc-supply = <&mt6359_vgpu11_buck_reg>;
++	sram-supply = <&mt6359_vsram_proc1_ldo_reg>;
++};
++
+-- 
+2.47.3
+

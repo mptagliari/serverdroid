@@ -1,0 +1,24 @@
+From d1ff908fa2bd391f1950b79572727827c3a0abad Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 13:50:35 -0300
+Subject: [PATCH 03/18] ufs: host: mediatek: add the mt6833-ufshci compatible
+
+---
+ drivers/ufs/host/ufs-mediatek.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/ufs/host/ufs-mediatek.c b/drivers/ufs/host/ufs-mediatek.c
+index 3991a5126..88379ed58 100644
+--- a/drivers/ufs/host/ufs-mediatek.c
++++ b/drivers/ufs/host/ufs-mediatek.c
+@@ -49,6 +49,7 @@ static const struct ufs_dev_quirk ufs_mtk_dev_fixups[] = {
+ };
+ 
+ static const struct of_device_id ufs_mtk_of_match[] = {
++	{ .compatible = "mediatek,mt6833-ufshci" },
+ 	{ .compatible = "mediatek,mt8183-ufshci" },
+ 	{ .compatible = "mediatek,mt8195-ufshci" },
+ 	{},
+-- 
+2.47.3
+

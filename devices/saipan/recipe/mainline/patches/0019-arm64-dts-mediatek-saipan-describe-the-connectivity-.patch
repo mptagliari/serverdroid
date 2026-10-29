@@ -1,0 +1,120 @@
+From 22919844e92e2e69ef7afca7e87c08fe030ee22a Mon Sep 17 00:00:00 2001
+From: Matheus Tagliari <160161347+mptagliari@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 21:49:27 -0300
+Subject: [PATCH] arm64: dts: mediatek: saipan: describe the connectivity block
+ (CONN power domain, consys, btif, wifi, vcn rails)
+
+Nothing is powered or probed: no driver for these nodes is built in, the CONN
+domain is default-off and the vcn rails have no consumer.
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 90 +++++++++++++++++++
+ 1 file changed, 90 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 36676255f..071020326 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -21,6 +21,7 @@
+ #include <dt-bindings/leds/common.h>
+ #include <dt-bindings/pinctrl/mt6833-pinfunc.h>
+ #include <dt-bindings/pinctrl/mt65xx.h>
++#include <dt-bindings/power/mediatek,mt6833-power.h>
+ #include <dt-bindings/reset/mt6833-resets.h>
+ #include <dt-bindings/thermal/mediatek,lvts-thermal.h>
+ #include <dt-bindings/thermal/thermal.h>
+@@ -1074,3 +1075,92 @@ power-key {
+ 		};
+ 	};
+ };
++
++/*
++ * Connectivity (stage W1): the MT6631 / CONSYS block (Wi-Fi, Bluetooth, FM, GPS) described for a
++ * future driver. Nothing here loads a driver or powers the block: the stock nodes below carry no
++ * driver in this kernel, the CONN power domain is registered as default-off, and the vcn rails stay
++ * off until a consumer asks for them. Differences from the stock Motorola tree (docs/wifi-investigation.md):
++ *  - the stock "conn" clock (a downstream power domain exposed as a clock) becomes a real power
++ *    domain, "power-domains = <&spm MT6833_POWER_DOMAIN_CONN>"; "ccif" stays a clock;
++ *  - the vcn supplies are named on the consys node (the downstream tree wraps each rail in a
++ *    "regulator-fixed" node); the voltage ranges below are the ones the stock tree declares;
++ *  - consys gets a memory-region (the 5.10+ Motorola code and the mainline adapter look it up).
++ * The reserved regions themselves (consys 5 MB, wifi 6 MB, dynamically placed) are the stock ones.
++ */
++/ {
++	scpsys_ml: syscon@10006000 {
++		compatible = "mediatek,mt6833-scpsys", "syscon", "simple-mfd";
++		reg = <0 0x10006000 0 0x1000>;
++
++		/* Only CONN: the other domains are left as the bootloader set them. */
++		spm: power-controller {
++			compatible = "mediatek,mt6833-power-controller";
++			#address-cells = <1>;
++			#size-cells = <0>;
++			#power-domain-cells = <1>;
++
++			power-domain@MT6833_POWER_DOMAIN_CONN {
++				reg = <MT6833_POWER_DOMAIN_CONN>;
++				mediatek,infracfg = <&infracfg_ao>;
++				#power-domain-cells = <0>;
++			};
++		};
++	};
++};
++
++&mt6359 {
++	regulators {
++		mt6359_vcn18_ldo_reg: ldo_vcn18 {
++			regulator-name = "vcn18";
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-enable-ramp-delay = <240>;
++		};
++
++		mt6359_vcn13_ldo_reg: ldo_vcn13 {
++			regulator-name = "vcn13";
++			regulator-min-microvolt = <900000>;
++			regulator-max-microvolt = <1300000>;
++			regulator-enable-ramp-delay = <240>;
++		};
++
++		mt6359_vcn33_1_ldo_reg: ldo_vcn33_1 {
++			regulator-name = "vcn33_1";
++			regulator-min-microvolt = <2800000>;
++			regulator-max-microvolt = <3500000>;
++			regulator-enable-ramp-delay = <240>;
++		};
++
++		mt6359_vcn33_2_ldo_reg: ldo_vcn33_2 {
++			regulator-name = "vcn33_2";
++			regulator-min-microvolt = <2800000>;
++			regulator-max-microvolt = <3500000>;
++			regulator-enable-ramp-delay = <240>;
++		};
++	};
++};
++
++&{/btif@1100c000} {
++	clocks = <&infracfg_ao CLK_IFRAO_BTIF>, <&infracfg_ao CLK_IFRAO_AP_DMA>;
++	clock-names = "btifc", "apdmac";
++	status = "okay";
++};
++
++&consys {
++	clocks = <&infracfg_ao CLK_IFRAO_CCIF4_AP>;
++	clock-names = "ccif";
++	power-domains = <&spm MT6833_POWER_DOMAIN_CONN>;
++	memory-region = <&{/reserved-memory/consys-reserve-memory}>;
++	vcn18-supply = <&mt6359_vcn18_ldo_reg>;
++	vcn13-supply = <&mt6359_vcn13_ldo_reg>;
++	vcn33_1_bt-supply = <&mt6359_vcn33_1_ldo_reg>;
++	vcn33_1_wifi-supply = <&mt6359_vcn33_1_ldo_reg>;
++	vcn33_2_bt-supply = <&mt6359_vcn33_2_ldo_reg>;
++	vcn33_2_wifi-supply = <&mt6359_vcn33_2_ldo_reg>;
++	status = "okay";
++};
++
++&wifi {
++	status = "okay";
++};
+-- 
+2.47.3
+

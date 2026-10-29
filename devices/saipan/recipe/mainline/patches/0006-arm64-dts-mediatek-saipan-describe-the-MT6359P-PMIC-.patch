@@ -1,0 +1,216 @@
+From 2e844346c99dd16eb5b6a1bcb6fe9cc69aa68ac2 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 16:22:03 -0300
+Subject: [PATCH 06/18] arm64: dts: mediatek: saipan: describe the MT6359P PMIC
+ and its 24 boot-enabled rails
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 180 +++++++++++++++---
+ 1 file changed, 155 insertions(+), 25 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 0bdc5f0cd..eb7312464 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -257,30 +257,10 @@ pins {
+ };
+ 
+ /*
+- * UFS (stage M2). The preloader leaves the UFS rails on and the kernel never writes their PMIC
+- * enable registers (docs/ufs-init-instrumentation.md), so they are described as always-on fixed
+- * regulators until the MT6359 PMIC regulators are added. The downstream node names only vemc;
+- * vufs (1.8 V) is driven by vendor code and is assumed to be the device's VCCQ2 (not verified).
+- * Only the HCI reset is wired: the downstream kernel resets only the HCI during bring-up.
++ * UFS (stage M2). The downstream node names only vemc; vufs (1.8 V) is driven by vendor code and
++ * is assumed to be the device's VCCQ2 (not verified). Both are the real MT6359P rails now (stage
++ * M6). Only the HCI reset is wired: the downstream kernel resets only the HCI during bring-up.
+  */
+-/ {
+-	reg_vemc: regulator-vemc {
+-		compatible = "regulator-fixed";
+-		regulator-name = "vemc";
+-		regulator-min-microvolt = <3000000>;
+-		regulator-max-microvolt = <3000000>;
+-		regulator-always-on;
+-	};
+-
+-	reg_vufs: regulator-vufs {
+-		compatible = "regulator-fixed";
+-		regulator-name = "vufs18";
+-		regulator-min-microvolt = <1800000>;
+-		regulator-max-microvolt = <1800000>;
+-		regulator-always-on;
+-	};
+-};
+-
+ &infracfg_ao {
+ 	#reset-cells = <1>;
+ };
+@@ -296,8 +276,8 @@ &ufshci {
+ 	freq-table-hz = <0 0>, <0 0>, <0 0>, <0 0>;
+ 	resets = <&infracfg_ao MT6833_INFRA_RST1_UFSHCI_SWRST>;
+ 	reset-names = "hci_rst";
+-	vcc-supply = <&reg_vemc>;
+-	vccq2-supply = <&reg_vufs>;
++	vcc-supply = <&mt6359_vemc_reg>;
++	vccq2-supply = <&mt6359_vufs_reg>;
+ 	mediatek,ufs-disable-mcq;
+ };
+ 
+@@ -435,3 +415,153 @@ soc_crit: trip-crit {
+ 		};
+ 	};
+ };
++
++/*
++ * PMIC (stage M6): the MT6359P behind the PMIC wrapper. The preloader initialized the wrapper and
++ * enabled the rails below before the kernel ran (docs/ufs-init-instrumentation.md). The list is the
++ * set of regulators the downstream kernel found already enabled when it registered them (run B,
++ * sd_state "regulator_enabled_pre_constraints" == 1, 24 rails). Each is marked always-on and left at
++ * the voltage the boot chain set (no voltage constraints), so the kernel never switches one off
++ * or moves it: the vendor kernel also refuses to disable vufs and vio28. Rails that were off stay
++ * unmanaged until a consumer needs them.
++ */
++/ {
++	pmic-wrapper@10026000 {
++		compatible = "mediatek,mt6833-pwrap";
++		reg = <0 0x10026000 0 0x1000>;
++		reg-names = "pwrap";
++		interrupts = <0 220 4>;
++		clocks = <&infracfg_ao CLK_IFRAO_PMIC_AP>,
++			 <&infracfg_ao CLK_IFRAO_PMIC_TMR>;
++		clock-names = "spi", "wrap";
++
++		mt6359: pmic {
++			compatible = "mediatek,mt6359";
++			interrupts-extended = <&pio_ml 118 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-controller;
++			#interrupt-cells = <2>;
++
++			regulators {
++				buck_vs1 {
++					regulator-name = "vs1";
++					regulator-always-on;
++				};
++
++				buck_vgpu11 {
++					regulator-name = "vgpu11";
++					regulator-always-on;
++				};
++
++				buck_vpu {
++					regulator-name = "vpu";
++					regulator-always-on;
++				};
++
++				buck_vcore {
++					regulator-name = "vcore";
++					regulator-always-on;
++				};
++
++				buck_vs2 {
++					regulator-name = "vs2";
++					regulator-always-on;
++				};
++
++				buck_vproc2 {
++					regulator-name = "vproc2";
++					regulator-always-on;
++				};
++
++				buck_vproc1 {
++					regulator-name = "vproc1";
++					regulator-always-on;
++				};
++
++				ldo_vaud18 {
++					regulator-name = "vaud18";
++					regulator-always-on;
++				};
++
++				ldo_vrf12 {
++					regulator-name = "vrf12";
++					regulator-always-on;
++				};
++
++				ldo_vusb {
++					regulator-name = "vusb";
++					regulator-always-on;
++				};
++
++				ldo_vsram_proc2 {
++					regulator-name = "vsram_proc2";
++					regulator-always-on;
++				};
++
++				ldo_vio18 {
++					regulator-name = "vio18";
++					regulator-always-on;
++				};
++
++				ldo_vaux18 {
++					regulator-name = "vaux18";
++					regulator-always-on;
++				};
++
++				ldo_vsram_others {
++					regulator-name = "vsram_others";
++					regulator-always-on;
++				};
++
++				ldo_vxo22 {
++					regulator-name = "vxo22";
++					regulator-always-on;
++				};
++
++				ldo_vbif28 {
++					regulator-name = "vbif28";
++					regulator-always-on;
++				};
++
++				ldo_vio28 {
++					regulator-name = "vio28";
++					regulator-always-on;
++				};
++
++				mt6359_vemc_reg: ldo_vemc_1 {
++					regulator-name = "vemc";
++					regulator-always-on;
++				};
++
++				ldo_va12 {
++					regulator-name = "va12";
++					regulator-always-on;
++				};
++
++				ldo_va09 {
++					regulator-name = "va09";
++					regulator-always-on;
++				};
++
++				ldo_vsram_md {
++					regulator-name = "vsram_md";
++					regulator-always-on;
++				};
++
++				mt6359_vufs_reg: ldo_vufs {
++					regulator-name = "vufs";
++					regulator-always-on;
++				};
++
++				ldo_vm18 {
++					regulator-name = "vm18";
++					regulator-always-on;
++				};
++
++				ldo_vsram_proc1 {
++					regulator-name = "vsram_proc1";
++					regulator-always-on;
++				};
++			};
++		};
++	};
++};
+-- 
+2.47.3
+

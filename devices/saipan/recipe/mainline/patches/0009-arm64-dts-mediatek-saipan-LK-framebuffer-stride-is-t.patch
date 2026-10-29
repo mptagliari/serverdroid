@@ -1,0 +1,35 @@
+From c66d7e2e558603ba2fa0cd67f6f40fc0a422fbf7 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 18:10:16 -0300
+Subject: [PATCH 09/18] arm64: dts: mediatek: saipan: LK framebuffer stride is
+ the tight 720 * 4
+
+---
+ arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 77a3ac439..02f293f38 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -43,14 +43,14 @@ chosen {
+ 		/*
+ 		 * The splash framebuffer set up by LK (atag,videolfb: base 0x78a80000, 13824 KiB reserved as
+ 		 * mblock-21-framebuffer, panel icnl9911c_hd_dsi_vdo_incell_truly, 720x1600). The stride
+-		 * (32-pixel aligned) and format are a guess to be checked against the buffer contents.
++		 * is the tight 720 * 4: a 32-pixel aligned guess (736 * 4) showed a skewed picture.
+ 		 */
+ 		framebuffer@78a80000 {
+ 			compatible = "simple-framebuffer";
+-			reg = <0 0x78a80000 0 (736 * 1600 * 4)>;
++			reg = <0 0x78a80000 0 (720 * 1600 * 4)>;
+ 			width = <720>;
+ 			height = <1600>;
+-			stride = <(736 * 4)>;
++			stride = <(720 * 4)>;
+ 			format = "a8r8g8b8";
+ 		};
+ 	};
+-- 
+2.47.3
+

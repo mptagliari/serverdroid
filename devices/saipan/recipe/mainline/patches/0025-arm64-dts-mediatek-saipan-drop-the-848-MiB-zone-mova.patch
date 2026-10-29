@@ -1,0 +1,36 @@
+From 30f37b6d36a5fcc482ad896234808f3216f9b708 Mon Sep 17 00:00:00 2001
+From: Matheus Tagliari <160161347+mptagliari@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 21:00:36 -0300
+Subject: [PATCH] arm64: dts: mediatek: saipan: drop the 848 MiB zone-movable
+ CMA reservation of the stock tree
+
+The stock tree reserves 848 MiB (zmc-default) for the Android kernel's
+zone-movable CMA; mainline has no user for it, so it stays reserved for good.
+Without the source node the memory is available to the kernel.
+---
+ arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index e6f002ae3..fc27edd97 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -1149,6 +1149,15 @@ power-domain@MT6833_POWER_DOMAIN_CONN {
+ 	};
+ };
+ 
++/*
++ * The stock tree reserves 848 MiB (zmc-default) as a "zone movable CMA" for the Android kernel; the bootloader turns it into an enabled
++ * zone-movable-cma-memory node. Mainline has no user for it, so it would stay reserved for good. Dropping the source node tests whether
++ * the bootloader still creates it (see docs/mainline-delta.md, memory).
++ */
++&reserved_memory {
++	/delete-node/ zmc-default;
++};
++
+ &mt6359 {
+ 	/* PMIC auxiliary ADC: battery voltage (batt_v), battery current (batt_i), battery thermistor (batt_temp), chip temperature */
+ 	pmic_adc: adc {
+-- 
+2.47.3
+

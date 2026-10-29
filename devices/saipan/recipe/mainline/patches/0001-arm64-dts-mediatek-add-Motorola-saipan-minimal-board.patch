@@ -1,0 +1,288 @@
+From 5412e305d7f4dd12824947d84cce6eaa6b82b16a Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 12:35:23 -0300
+Subject: [PATCH 01/18] arm64: dts: mediatek: add Motorola saipan minimal board
+ (M0 study)
+
+---
+ arch/arm64/boot/dts/mediatek/Makefile         |   2 +
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 254 ++++++++++++++++++
+ 2 files changed, 256 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+index d40f61cf4..a521c407e 100644
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
+@@ -7,6 +7,8 @@ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-sony-xperia-m5.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6797-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6797-x20-dev.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6833-samsung-a22x.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6833-motorola-saipan.dtb
++DTC_FLAGS_mt6833-motorola-saipan := -@
+ DTC_FLAGS_mt6833-samsung-a22x := -@
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6833-samsung-a22x-native-display.dtb
+ DTC_FLAGS_mt6833-samsung-a22x-native-display := -@
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+new file mode 100644
+index 000000000..39e7e6e87
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -0,0 +1,254 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR MIT)
++/*
++ * Motorola Moto G50 5G (XT2149-1, "saipan") - minimal mainline bring-up (stage M0, study).
++ *
++ * Derived from the a22x board file of the reference port (gitlab.com/pessdres/a22x-mainline,
++ * GPL-2.0, same MT6833 SoC) with everything beyond UART, USB device/Type-C and the clock
++ * providers removed. The stock Motorola tree is kept (mt6833-motorola-saipan-lk-compat.dtsi,
++ * generated from the stock boot.img DTB) because the bootloader applies dtbo.img overlays to it.
++ * Wiring checked against the running Motorola tree: MT6360 on I2C5 at 0x34, IRQB GPIO10,
++ * PD_IRQB GPIO9, same as the a22x. UART0 pins GPIO61/62 are taken from the a22x file unchecked.
++ * Not yet booted on hardware.
++ */
++
++/dts-v1/;
++#include <dt-bindings/clock/mt6833-clk.h>
++#include <dt-bindings/phy/phy.h>
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include <dt-bindings/usb/pd.h>
++#include <dt-bindings/leds/common.h>
++#include <dt-bindings/pinctrl/mt6833-pinfunc.h>
++#include <dt-bindings/pinctrl/mt65xx.h>
++#include "mt6833-motorola-saipan-lk-compat.dtsi"
++
++/ {
++	model = "Motorola Moto G50 5G (XT2149-1)";
++	compatible = "motorola,saipan", "mediatek,mt6833";
++
++	aliases {
++		serial0 = &apuart0;
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "serial0:921600n8";
++		bootargs = "console=ttyS0,921600n8";
++	};
++
++	pio_ml: pinctrl@10005000 {
++		compatible = "mediatek,mt6833-pinctrl";
++		reg = <0 0x10005000 0 0x1000>,
++		      <0 0x11c30000 0 0x1000>,
++		      <0 0x11d10000 0 0x1000>,
++		      <0 0x11d40000 0 0x1000>,
++		      <0 0x11e20000 0 0x1000>,
++		      <0 0x11e60000 0 0x1000>,
++		      <0 0x11ea0000 0 0x1000>,
++		      <0 0x1000b000 0 0x1000>;
++		reg-names = "gpio", "iocfg_rb", "iocfg_bm", "iocfg_br",
++			    "iocfg_lm", "iocfg_bl", "iocfg_rt", "eint";
++		gpio-controller;
++		#gpio-cells = <2>;
++		gpio-ranges = <&pio_ml 0 0 201>;
++		interrupt-controller;
++		#interrupt-cells = <2>;
++		interrupts = <0 212 4>;
++
++		/* Mux only; pulls and drive strength stay as the bootloader set them. */
++		uart0_pins: uart0-pins {
++			pins-rx-tx {
++				pinmux = <PINMUX_GPIO61__FUNC_URXD0>,
++					 <PINMUX_GPIO62__FUNC_UTXD0>;
++			};
++		};
++		i2c5_pins: i2c5-pins {
++			pins-bus {
++				pinmux = <PINMUX_GPIO107__FUNC_SCL5>,
++					 <PINMUX_GPIO108__FUNC_SDA5>;
++			};
++		};
++	};
++
++	u2phy: t-phy@11e40000 {
++		compatible = "mediatek,mt6833-tphy", "mediatek,generic-tphy-v2";
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges = <0 0 0x11e40000 0x1000>;
++
++		u2port0: usb-phy@0 {
++			reg = <0x0 0x700>;
++			clocks = <&uart_clk>;
++			clock-names = "ref";
++			#phy-cells = <1>;
++		};
++	};
++
++	usb_otg: usb@11200000 {
++		compatible = "mediatek,mt6833-musb", "mediatek,mtk-musb";
++		reg = <0 0x11200000 0 0x1000>;
++		interrupts = <0 96 4>;
++		interrupt-names = "mc";
++		phys = <&u2port0 PHY_TYPE_USB2>;
++		dr_mode = "otg";
++		usb-role-switch;
++		clocks = <&infracfg_ao CLK_IFRAO_SSUSB>,
++			 <&topckgen CLK_TOP_USB_TOP_SEL>,
++			 <&topckgen CLK_TOP_UNIVPLL_D5_D4>;
++		clock-names = "main", "mcu", "univpll";
++
++		port {
++			usb_otg_hs: endpoint {
++				remote-endpoint = <&typec_hs>;
++			};
++		};
++	};
++
++	watchdog@10007000 {
++		compatible = "mediatek,mt6833-wdt", "mediatek,mt6589-wdt";
++		reg = <0 0x10007000 0 0x100>;
++		#reset-cells = <1>;
++	};
++};
++
++&apuart0 {
++	clocks = <&uart_clk>, <&infracfg_ao CLK_IFRAO_UART0>;
++	clock-names = "baud", "bus";
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart0_pins>;
++};
++
++&uart_clk {
++	#clock-cells = <0>;
++};
++
++&apmixed {
++	status = "okay";
++};
++
++&topckgen {
++	status = "okay";
++};
++
++&infracfg_ao {
++	status = "okay";
++};
++
++&imp_iic_wrap_w {
++	status = "okay";
++};
++
++&imp_iic_wrap_ws {
++	status = "okay";
++};
++
++&imp_iic_wrap_s {
++	status = "okay";
++};
++
++/ {
++	i2c5_ml: i2c@11e01000 {
++		compatible = "mediatek,mt6833-i2c", "mediatek,mt8192-i2c";
++		reg = <0 0x11e01000 0 0x1000>,
++		      <0 0x10217500 0 0x80>;
++		interrupts = <0 117 4>;
++		clocks = <&imp_iic_wrap_w CLK_IMPW_AP_CLOCK_RO_I2C5>,
++			 <&infracfg_ao CLK_IFRAO_AP_DMA>;
++		clock-names = "main", "dma";
++		clock-div = <1>;
++		clock-frequency = <400000>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&i2c5_pins>;
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		mt6360: pmic@34 {
++			compatible = "mediatek,mt6360";
++			reg = <0x34>;
++			interrupts-extended = <&pio_ml 10 IRQ_TYPE_EDGE_FALLING>;
++			interrupt-names = "IRQB";
++			interrupt-controller;
++			#interrupt-cells = <1>;
++
++			mt6360_adc: adc {
++				compatible = "mediatek,mt6360-adc";
++				#io-channel-cells = <1>;
++			};
++
++			/*
++			 * Only the SD card supplies are described; the other
++			 * MT6360 rails keep their bootloader state.
++			 */
++			regulator {
++				compatible = "mediatek,mt6360-regulator";
++
++				mt6360_ldo3: ldo3 {
++					regulator-name = "vmc";
++					regulator-min-microvolt = <1800000>;
++					regulator-max-microvolt = <3300000>;
++				};
++
++				mt6360_ldo5: ldo5 {
++					regulator-name = "vmch";
++					regulator-min-microvolt = <3300000>;
++					regulator-max-microvolt = <3300000>;
++				};
++			};
++
++			/* Leaves ICHG/AICR/CV as set by the bootloader (stock: 2 A / 0.5 A / 4.4 V). */
++			mt6360_chg: charger {
++				compatible = "mediatek,mt6360-chg";
++				richtek,vinovp-microvolt = <6500000>;
++
++				otg_vbus: usb-otg-vbus-regulator {
++					regulator-name = "usb-otg-vbus";
++					regulator-min-microvolt = <5000000>;
++					regulator-max-microvolt = <5000000>;
++				};
++			};
++
++			mt6360_tcpc: tcpc {
++				compatible = "mediatek,mt6360-tcpc";
++				/* A22X DTBO overrides the base GPIO24 with GPIO9. */
++				interrupts-extended = <&pio_ml 9 IRQ_TYPE_LEVEL_LOW>;
++				interrupt-names = "PD_IRQB";
++				pinctrl-names = "default";
++				pinctrl-0 = <&typec_irq_pin>;
++				vbus-supply = <&otg_vbus>;
++
++				connector {
++					compatible = "usb-c-connector";
++					label = "USB-C";
++					data-role = "dual";
++					power-role = "dual";
++					try-power-role = "sink";
++					source-pdos = <PDO_FIXED(5000, 500,
++						PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP |
++						PDO_FIXED_USB_COMM)>;
++					sink-pdos = <PDO_FIXED(5000, 2000,
++						PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP |
++						PDO_FIXED_USB_COMM)>;
++					op-sink-microwatt = <2500000>;
++
++					port {
++						typec_hs: endpoint {
++							remote-endpoint = <&usb_otg_hs>;
++						};
++					};
++				};
++			};
++		};
++	};
++};
++
++&pio_ml {
++	typec_irq_pin: typec-irq-pin {
++		pins {
++			pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
++			input-enable;
++			bias-pull-up;
++		};
++	};
++};
+-- 
+2.47.3
+

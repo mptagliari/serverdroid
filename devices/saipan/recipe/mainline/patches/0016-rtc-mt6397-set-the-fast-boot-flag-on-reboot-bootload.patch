@@ -1,0 +1,110 @@
+From 8addc54fae34585353d9522b692d770b9bf7382b Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 20:47:25 -0300
+Subject: [PATCH 16/18] rtc: mt6397: set the fast-boot flag on reboot
+ bootloader
+
+---
+ drivers/rtc/rtc-mt6397.c       | 35 ++++++++++++++++++++++++++++++++++
+ include/linux/mfd/mt6397/rtc.h |  4 ++++
+ 2 files changed, 39 insertions(+)
+
+diff --git a/drivers/rtc/rtc-mt6397.c b/drivers/rtc/rtc-mt6397.c
+index 3d857681f..b6a190306 100644
+--- a/drivers/rtc/rtc-mt6397.c
++++ b/drivers/rtc/rtc-mt6397.c
+@@ -11,6 +11,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/reboot.h>
+ #include <linux/regmap.h>
+ #include <linux/rtc.h>
+ #include <linux/mfd/mt6397/rtc.h>
+@@ -243,6 +244,32 @@ static const struct rtc_class_ops mtk_rtc_ops = {
+ 	.set_alarm  = mtk_rtc_set_alarm,
+ };
+ 
++/*
++ * "reboot bootloader": the vendor bootloader (LK) enters fastboot when the fast-boot flag, bit 13 of
++ * the PMIC RTC register PDN1, is set. The vendor kernel's rtc_mark_fast() sets it. A reboot
++ * notifier runs before the restart handlers, so the flag is in place when the system resets.
++ */
++static int mtk_rtc_reboot(struct notifier_block *nb, unsigned long action, void *cmd)
++{
++	struct mt6397_rtc *rtc = container_of(nb, struct mt6397_rtc, reboot_nb);
++
++	if (action != SYS_RESTART || !cmd || strcmp(cmd, "bootloader") || !rtc->data->pdn1)
++		return NOTIFY_DONE;
++
++	mutex_lock(&rtc->lock);
++	if (!regmap_update_bits(rtc->regmap, rtc->addr_base + rtc->data->pdn1,
++				RTC_PDN1_FAST_BOOT, RTC_PDN1_FAST_BOOT))
++		mtk_rtc_write_trigger(rtc);
++	mutex_unlock(&rtc->lock);
++
++	return NOTIFY_DONE;
++}
++
++static void mtk_rtc_unregister_reboot(void *data)
++{
++	unregister_reboot_notifier(data);
++}
++
+ static int mtk_rtc_probe(struct platform_device *pdev)
+ {
+ 	struct resource *res;
+@@ -293,6 +320,13 @@ static int mtk_rtc_probe(struct platform_device *pdev)
+ 	rtc->rtc_dev->start_secs = mktime64(1968, 1, 2, 0, 0, 0);
+ 	rtc->rtc_dev->set_start_time = true;
+ 
++	if (rtc->data->pdn1) {
++		rtc->reboot_nb.notifier_call = mtk_rtc_reboot;
++		if (!register_reboot_notifier(&rtc->reboot_nb))
++			devm_add_action_or_reset(&pdev->dev, mtk_rtc_unregister_reboot,
++						 &rtc->reboot_nb);
++	}
++
+ 	return devm_rtc_register_device(rtc->rtc_dev);
+ }
+ 
+@@ -323,6 +357,7 @@ static SIMPLE_DEV_PM_OPS(mt6397_pm_ops, mt6397_rtc_suspend,
+ 
+ static const struct mtk_rtc_data mt6358_rtc_data = {
+ 	.wrtgr = RTC_WRTGR_MT6358,
++	.pdn1 = RTC_PDN1_MT6358,
+ };
+ 
+ static const struct mtk_rtc_data mt6397_rtc_data = {
+diff --git a/include/linux/mfd/mt6397/rtc.h b/include/linux/mfd/mt6397/rtc.h
+index 27883af44..76058c2d6 100644
+--- a/include/linux/mfd/mt6397/rtc.h
++++ b/include/linux/mfd/mt6397/rtc.h
+@@ -57,6 +57,8 @@
+ #define RTC_AL_MTH_MASK        0x000f
+ #define RTC_AL_YEA_MASK        0x007f
+ 
++#define RTC_PDN1_MT6358        0x002c
++#define RTC_PDN1_FAST_BOOT     BIT(13)
+ #define RTC_PDN2               0x002e
+ #define RTC_PDN2_PWRON_ALARM   BIT(4)
+ 
+@@ -65,6 +67,7 @@
+ 
+ struct mtk_rtc_data {
+ 	u32                     wrtgr;
++	u32                     pdn1;	/* spare register holding the fast-boot flag, 0 if unknown */
+ };
+ 
+ struct mt6397_rtc {
+@@ -76,6 +79,7 @@ struct mt6397_rtc {
+ 	int                     irq;
+ 	u32                     addr_base;
+ 	const struct mtk_rtc_data *data;
++	struct notifier_block   reboot_nb;
+ };
+ 
+ #endif /* _LINUX_MFD_MT6397_RTC_H_ */
+-- 
+2.47.3
+
