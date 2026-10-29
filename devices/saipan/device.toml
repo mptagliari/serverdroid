@@ -1,0 +1,55 @@
+schema_version = 1
+
+[device]
+codename = "saipan"
+manufacturer = "Motorola"
+model = "moto g50 5G, XT2149-1"
+soc = "MediaTek MT6833"
+variants = ["xt2149-1"]
+
+[[sources]]
+id = "motorola-unlock-page"
+url = "https://www.motorola.com/unlockbootloader"
+description = "Motorola's own bootloader-unlock entry point; this unit's bootloader warning screen points to this address. The account sign-in, eligibility check and waiting-period steps were read secondhand from third-party install guides, not from this page directly, and are reported as such."
+
+[[sources]]
+id = "linux-kernel"
+url = "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+description = "Upstream Linux kernel, GPL-2.0-only. The recipe builds a pinned mainline release plus a reference-port patch series and this project's own patches (not committed in this submission)."
+
+[[sources]]
+id = "a22x-mainline-reference-port"
+url = "https://gitlab.com/pessdres/a22x-mainline"
+description = "Community mainline-Linux reference port for the related MediaTek MT6833 a22x device family, GPL-2.0 (confirmed by reading its LICENSE file). The recipe applies a pinned revision of its patch series; not committed in this submission."
+
+[[sources]]
+id = "alpine-linux"
+url = "https://alpinelinux.org"
+description = "Alpine Linux, the root-filesystem base used by the recipe. Alpine's own tools are MIT-licensed; individual packages it installs keep their own licenses."
+
+[research.bootloader]
+outcome = "feasible"
+summary = "This unit's bootloader was unlocked through Motorola's own account-bound unlock process before this project began, and the device has run a self-built kernel since. The exact eligibility and waiting-period conditions were not re-read from Motorola's page for this report (see motorola-unlock-page); they are reported from the device's own prompts and third-party guides, not primary-sourced here."
+sources = ["motorola-unlock-page"]
+
+[research.kernel]
+outcome = "feasible"
+summary = "A mainline Linux kernel (currently v7.2) boots this unit as a native Linux server: verified repeatedly by the owner on the physical device, with UFS storage, MT6359P power rails, thermal, CPU frequency scaling, RTC, backlight, Type-C host with PD, a charge-limit policy, touch and Wi-Fi all working. The recipe combines a pinned revision of a community reference port for the related a22x MT6833 family with this project's own patches; neither the patch files nor the device-specific build configuration are committed in this submission."
+sources = ["linux-kernel", "a22x-mainline-reference-port"]
+
+[research.hardware_minimum]
+outcome = "feasible"
+summary = "Storage (UFS), Wi-Fi and USB host/device networking are confirmed working on the physical unit under a headless native-Linux root (Alpine), with SSH administration and no Android userspace. Charging works with a charge-limit policy; a software power-off and recovery from a warm reboot without the Power key are still open."
+sources = ["linux-kernel", "alpine-linux"]
+
+[safety]
+recovery = "RECOVERY.md"
+proposed_writes = []
+protected_partitions = []
+partition_sources = []
+
+[[claims]]
+capability = "boot"
+state = "not_tested"
+verification = "none"
+evidence = []
