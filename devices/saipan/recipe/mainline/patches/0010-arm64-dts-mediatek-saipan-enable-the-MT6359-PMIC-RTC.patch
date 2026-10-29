@@ -1,0 +1,29 @@
+From 18fcc3e9b94fd0f330561ccf86ef3054d0b70b20 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 18:17:33 -0300
+Subject: [PATCH 10/18] arm64: dts: mediatek: saipan: enable the MT6359 PMIC
+ RTC
+
+---
+ arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 02f293f38..e9cae0e26 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -490,6 +490,11 @@ mt6359: pmic {
+ 			interrupt-controller;
+ 			#interrupt-cells = <2>;
+ 
++			/* Battery-backed clock in the PMIC; the kernel sets the system time from it at boot. */
++			rtc {
++				compatible = "mediatek,mt6358-rtc";
++			};
++
+ 			regulators {
+ 				buck_vs1 {
+ 					regulator-name = "vs1";
+-- 
+2.47.3
+

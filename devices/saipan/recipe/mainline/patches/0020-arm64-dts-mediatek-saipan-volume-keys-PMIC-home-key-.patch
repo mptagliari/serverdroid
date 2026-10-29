@@ -1,0 +1,67 @@
+From 1060c918b4d59b6a9b938b0bfc29040b97ad5733 Mon Sep 17 00:00:00 2001
+From: Matheus Tagliari <160161347+mptagliari@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 11:06:49 -0300
+Subject: [PATCH] arm64: dts: mediatek: saipan: volume keys (PMIC home key as
+ volume down, SoC keypad key 0 as volume up)
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 33 +++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 071020326..abb7b2de5 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -89,6 +89,13 @@ pins-bus {
+ 					 <PINMUX_GPIO108__FUNC_SDA5>;
+ 			};
+ 		};
++		/* Volume up is on keypad column 0 (GPIO79) and the assistant button on column 1 (GPIO80, Motorola map index 1 = 0xd9); the pads were not in keypad mode (K1 test: key registers idle). */
++		keypad_pins: keypad-pins {
++			pins-cols {
++				pinmux = <PINMUX_GPIO79__FUNC_KPCOL0>,
++					 <PINMUX_GPIO80__FUNC_KPCOL1>;
++			};
++		};
+ 	};
+ 
+ 	u2phy: t-phy@11e40000 {
+@@ -1073,9 +1080,35 @@ power-key {
+ 			linux,keycodes = <KEY_POWER>;
+ 			wakeup-source;
+ 		};
++
++		/* The Motorola tree names this key kpd-sw-rstkey = KEY_VOLUMEDOWN (0x72): the PMIC home key. */
++		home-key {
++			linux,keycodes = <KEY_VOLUMEDOWN>;
++		};
+ 	};
+ };
+ 
++/*
++ * Volume up (stage K1): key 0 of the SoC keypad block, KEY_VOLUMEUP in the Motorola map (kpd-hw-init-map[0] = 0x73), and the assistant button, key 1
++ * (0xd9 in the Motorola map). The stock node is "mediatek,kp"; this describes the same block for the mainline mt6779-keypad driver (26 MHz clock, as in the binding).
++ * The column pad (GPIO79) is muxed to the keypad function, as in the a22x device tree (the Motorola tree has no pin control for it; the pad was not in keypad mode at boot).
++ */
++&{/kp@10010000} {
++	compatible = "mediatek,mt6779-keypad";
++	clocks = <&clk26m>;
++	clock-names = "kpd";
++	pinctrl-names = "default";
++	pinctrl-0 = <&keypad_pins>;
++	wakeup-source;
++	/* The block is 8 rows by 9 columns (Motorola kpd-hw-map-num = 72): one key press showed up in several rows of its column
++	 * (rows float), and a smaller keymap made the driver index past its table. */
++	keypad,num-rows = <8>;
++	keypad,num-columns = <9>;
++	linux,keymap = <MATRIX_KEY(0, 0, KEY_VOLUMEUP)
++			MATRIX_KEY(0, 1, KEY_ASSISTANT)>;
++	debounce-delay-ms = <16>;
++};
++
+ /*
+  * Connectivity (stage W1): the MT6631 / CONSYS block (Wi-Fi, Bluetooth, FM, GPS) described for a
+  * future driver. Nothing here loads a driver or powers the block: the stock nodes below carry no
+-- 
+2.47.3
+

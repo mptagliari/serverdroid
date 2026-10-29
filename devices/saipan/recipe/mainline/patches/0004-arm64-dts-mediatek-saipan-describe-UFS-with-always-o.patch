@@ -1,0 +1,74 @@
+From fb837c10bb0899ff9fd979368b4f5b9c0cb0271a Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 13:50:36 -0300
+Subject: [PATCH 04/18] arm64: dts: mediatek: saipan: describe UFS with
+ always-on fixed rails and the HCI reset
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 46 +++++++++++++++++++
+ 1 file changed, 46 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 39e7e6e87..1393bd95f 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -20,6 +20,7 @@
+ #include <dt-bindings/leds/common.h>
+ #include <dt-bindings/pinctrl/mt6833-pinfunc.h>
+ #include <dt-bindings/pinctrl/mt65xx.h>
++#include <dt-bindings/reset/mt6833-resets.h>
+ #include "mt6833-motorola-saipan-lk-compat.dtsi"
+ 
+ / {
+@@ -252,3 +253,48 @@ pins {
+ 		};
+ 	};
+ };
++
++/*
++ * UFS (stage M2). The preloader leaves the UFS rails on and the kernel never writes their PMIC
++ * enable registers (docs/ufs-init-instrumentation.md), so they are described as always-on fixed
++ * regulators until the MT6359 PMIC regulators are added. The downstream node names only vemc;
++ * vufs (1.8 V) is driven by vendor code and is assumed to be the device's VCCQ2 (not verified).
++ * Only the HCI reset is wired: the downstream kernel resets only the HCI during bring-up.
++ */
++/ {
++	reg_vemc: regulator-vemc {
++		compatible = "regulator-fixed";
++		regulator-name = "vemc";
++		regulator-min-microvolt = <3000000>;
++		regulator-max-microvolt = <3000000>;
++		regulator-always-on;
++	};
++
++	reg_vufs: regulator-vufs {
++		compatible = "regulator-fixed";
++		regulator-name = "vufs18";
++		regulator-min-microvolt = <1800000>;
++		regulator-max-microvolt = <1800000>;
++		regulator-always-on;
++	};
++};
++
++&infracfg_ao {
++	#reset-cells = <1>;
++};
++
++&ufshci {
++	status = "okay";
++	compatible = "mediatek,mt6833-ufshci", "mediatek,mt8183-ufshci";
++	clocks = <&infracfg_ao CLK_IFRAO_UFS>,
++		 <&infracfg_ao CLK_IFRAO_AES>,
++		 <&infracfg_ao CLK_IFRAO_UNIPRO_SYSCLK>,
++		 <&infracfg_ao CLK_IFRAO_UFS_MP_SAP_BCLK>;
++	clock-names = "ufs", "ufs_aes", "unipro_sysclk", "unipro_mp_bclk";
++	freq-table-hz = <0 0>, <0 0>, <0 0>, <0 0>;
++	resets = <&infracfg_ao MT6833_INFRA_RST1_UFSHCI_SWRST>;
++	reset-names = "hci_rst";
++	vcc-supply = <&reg_vemc>;
++	vccq2-supply = <&reg_vufs>;
++	mediatek,ufs-disable-mcq;
++};
+-- 
+2.47.3
+

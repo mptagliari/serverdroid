@@ -1,0 +1,73 @@
+From 76bf461eaae544f6d45bb2af21807fd7d29fd587 Mon Sep 17 00:00:00 2001
+From: Matheus Tagliari <160161347+mptagliari@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 21:06:03 -0300
+Subject: [PATCH] arm64: dts: mediatek: saipan: SPI4 and the touch controller
+ node (read-only stage)
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 42 +++++++++++++++++++
+ 1 file changed, 42 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index fc27edd97..ef3cd01af 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -217,6 +217,15 @@ mt6360_adc: adc {
+ 			regulator {
+ 				compatible = "mediatek,mt6360-regulator";
+ 
++				/* Supply of the touch controller ("vtp" in the stock tree, default on there) */
++				mt6360_ldo2: ldo2 {
++					regulator-name = "vtp";
++					regulator-min-microvolt = <1800000>;
++					regulator-max-microvolt = <1800000>;
++					regulator-boot-on;
++					regulator-always-on;
++				};
++
+ 				mt6360_ldo3: ldo3 {
+ 					regulator-name = "vmc";
+ 					regulator-min-microvolt = <1800000>;
+@@ -1149,6 +1158,39 @@ power-domain@MT6833_POWER_DOMAIN_CONN {
+ 	};
+ };
+ 
++/*
++ * Touch controller (stage T1, read only): the Chipone TDDI ICNL9911C of the stock tree sits on SPI4 (chip select 0, 4.8 MHz); its reset
++ * (GPIO15) and interrupt (GPIO14) lines are not described yet. There is no driver for it in mainline: the node is bound to spidev by hand
++ * (driver_override) so that tools/ctsread.c can read its registers.
++ */
++&pio_ml {
++	spi4_pins: spi4-pins {
++		pins-spi {
++			pinmux = <PINMUX_GPIO12__FUNC_SPI4_MI>,
++				 <PINMUX_GPIO13__FUNC_SPI4_MO>,
++				 <PINMUX_GPIO97__FUNC_SPI4_CLK>,
++				 <PINMUX_GPIO98__FUNC_SPI4_CSB>;
++		};
++	};
++};
++
++&spi4 {
++	status = "okay";
++	#address-cells = <1>;
++	#size-cells = <0>;
++	clocks = <&topckgen CLK_TOP_MAINPLL_D5_D4>,
++		 <&topckgen CLK_TOP_SPI_SEL>,
++		 <&infracfg_ao CLK_IFRAO_SPI4>;
++	pinctrl-names = "default";
++	pinctrl-0 = <&spi4_pins>;
++
++	touch@0 {
++		compatible = "chipone-tddi";
++		reg = <0>;
++		spi-max-frequency = <4800000>;
++	};
++};
++
+ /*
+  * The stock tree reserves 848 MiB (zmc-default) as a "zone movable CMA" for the Android kernel; the bootloader turns it into an enabled
+  * zone-movable-cma-memory node. Mainline has no user for it, so it would stay reserved for good. Dropping the source node tests whether
+-- 
+2.47.3
+

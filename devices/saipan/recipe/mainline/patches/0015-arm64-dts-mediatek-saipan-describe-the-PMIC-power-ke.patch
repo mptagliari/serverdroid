@@ -1,0 +1,45 @@
+From b1de99e168d3b4849b241dd77be1b7a4923b0f84 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 20:19:48 -0300
+Subject: [PATCH 15/18] arm64: dts: mediatek: saipan: describe the PMIC power
+ key
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts     | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 254d4b3dd..93235eef6 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -15,6 +15,7 @@
+ #include <dt-bindings/clock/mt6833-clk.h>
+ #include <dt-bindings/phy/phy.h>
+ #include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/input/input.h>
+ #include <dt-bindings/interrupt-controller/irq.h>
+ #include <dt-bindings/usb/pd.h>
+ #include <dt-bindings/leds/common.h>
+@@ -1046,3 +1047,19 @@ backlight: backlight@14013000 {
+ 		default-brightness-level = <127>;
+ 	};
+ };
++
++/*
++ * Power key (stage M22): the PMIC's PWRKEY pin. The kernel only reports the key; the status page
++ * uses it to wake the screen. Other buttons are not described: which PMIC or SoC keypad pin carries
++ * the volume keys on this board was not checked (the a22x wires HOMEKEY to volume-down; not assumed).
++ */
++&mt6359 {
++	keys {
++		compatible = "mediatek,mt6359-keys";
++
++		power-key {
++			linux,keycodes = <KEY_POWER>;
++			wakeup-source;
++		};
++	};
++};
+-- 
+2.47.3
+

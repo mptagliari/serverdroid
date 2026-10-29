@@ -1,0 +1,133 @@
+From 2cbd5839ae7d022fcddd8fb359b7dda0dccfc6fc Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 20:55:22 -0300
+Subject: [PATCH 17/18] backlight: mtk_dsi_vm: panel sleep and wake from
+ device-tree command lists on bl_power
+
+---
+ drivers/video/backlight/mtk_dsi_vm_bl.c | 83 +++++++++++++++++++++++++
+ 1 file changed, 83 insertions(+)
+
+diff --git a/drivers/video/backlight/mtk_dsi_vm_bl.c b/drivers/video/backlight/mtk_dsi_vm_bl.c
+index ee86a812e..2641dbbef 100644
+--- a/drivers/video/backlight/mtk_dsi_vm_bl.c
++++ b/drivers/video/backlight/mtk_dsi_vm_bl.c
+@@ -31,6 +31,7 @@
+ #define VM_CMD_HSTX		BIT(3)
+ #define VM_CMD_TS_VFP_EN	BIT(5)
+ 
++#define MIPI_DCS_SHORT_WRITE		0x05
+ #define MIPI_DCS_SHORT_WRITE_PARAM	0x15
+ #define MIPI_DCS_LONG_WRITE		0x39
+ #define DCS_SET_DISPLAY_BRIGHTNESS	0x51
+@@ -42,6 +43,10 @@ struct mtk_dsi_vm_bl {
+ 	bool hs;
+ 	bool wide;		/* 12-bit brightness: DCS 0x51 with two parameters (long write) */
+ 	unsigned int max;	/* sysfs maximum */
++	struct device *dev;
++	bool can_sleep;		/* the node gives the panel's sleep-in / sleep-out command lists */
++	bool asleep;
++	u32 sleep_in_ms, sleep_out_ms;
+ };
+ 
+ /*
+@@ -85,10 +90,83 @@ static int mtk_dsi_vm_bl_send(struct mtk_dsi_vm_bl *bl, u8 cmd, u8 param)
+ 	return mtk_dsi_vm_bl_send3(bl, cmd, param, 0, false);
+ }
+ 
++/* One command of 1 to 3 bytes: DCS short write, short write with parameter, or long write. */
++static int mtk_dsi_vm_bl_send_cmd(struct mtk_dsi_vm_bl *bl, const u8 *b, int len)
++{
++	u32 val;
++	int ret;
++
++	if (len == 3)
++		return mtk_dsi_vm_bl_send3(bl, b[0], b[1], b[2], true);
++	if (len == 2)
++		return mtk_dsi_vm_bl_send3(bl, b[0], b[1], 0, false);
++	if (len != 1)
++		return -EINVAL;
++
++	val = (b[0] << 16) | (MIPI_DCS_SHORT_WRITE << 8) | VM_CMD_EN | VM_CMD_TS_VFP_EN;
++	if (bl->hs)
++		val |= VM_CMD_HSTX;
++	mutex_lock(&bl->lock);
++	writel(val, bl->regs + DSI_VM_CMD_CON);
++	writel(readl(bl->regs + DSI_INTSTA) & ~VM_CMD_DONE, bl->regs + DSI_INTSTA);
++	writel(readl(bl->regs + DSI_START) & ~VM_CMD_START, bl->regs + DSI_START);
++	writel(readl(bl->regs + DSI_START) | VM_CMD_START, bl->regs + DSI_START);
++	ret = readl_poll_timeout(bl->regs + DSI_INTSTA, val, val & VM_CMD_DONE, 100,
++				 50 * USEC_PER_MSEC);
++	mutex_unlock(&bl->lock);
++	return ret;
++}
++
++/* A property of length-prefixed commands: <len b0 b1 ..> <len b0 ..> (len 1, 2 or 3). */
++static int mtk_dsi_vm_bl_send_seq(struct mtk_dsi_vm_bl *bl, const char *name)
++{
++	u8 buf[32];
++	int n = of_property_count_u8_elems(bl->dev->of_node, name), i = 0, ret = 0;
++
++	if (n <= 0 || n > sizeof(buf) ||
++	    of_property_read_u8_array(bl->dev->of_node, name, buf, n))
++		return -EINVAL;
++	while (i < n && !ret) {
++		int len = buf[i];
++
++		if (i + 1 + len > n)
++			return -EINVAL;
++		ret = mtk_dsi_vm_bl_send_cmd(bl, &buf[i + 1], len);
++		i += 1 + len;
++	}
++	return ret;
++}
++
+ static int mtk_dsi_vm_bl_update_status(struct backlight_device *bd)
+ {
+ 	struct mtk_dsi_vm_bl *bl = bl_get_data(bd);
+ 	int level = backlight_get_brightness(bd);
++	int ret;
++
++	/*
++	 * bl_power blanked (FB_BLANK_POWERDOWN): put the panel to sleep with its own commands when the
++	 * node lists them, otherwise only set the brightness to 0. Unblanking wakes it first.
++	 */
++	if (bl->can_sleep && backlight_is_blank(bd)) {
++		if (!bl->asleep) {
++			ret = mtk_dsi_vm_bl_send_seq(bl, "mediatek,sleep-in");
++			if (ret)
++				return ret;
++			msleep(bl->sleep_in_ms);
++			bl->asleep = true;
++		}
++		return 0;
++	}
++	if (bl->asleep) {
++		ret = mtk_dsi_vm_bl_send_seq(bl, "mediatek,sleep-out");
++		if (ret)
++			return ret;
++		msleep(bl->sleep_out_ms);
++		ret = mtk_dsi_vm_bl_send_seq(bl, "mediatek,sleep-out-then");
++		if (ret)
++			return ret;
++		bl->asleep = false;
++	}
+ 
+ 	if (bl->wide) {
+ 		/* sysfs 0..max to the panel's 12-bit DBV 0..4095 */
+@@ -137,7 +215,12 @@ static int mtk_dsi_vm_bl_probe(struct platform_device *pdev)
+ 			     &props.brightness);
+ 	if (!of_property_read_u32(dev->of_node, "max-brightness", &val))
+ 		props.max_brightness = val;
++	bl->dev = dev;
+ 	bl->max = props.max_brightness;
++	bl->can_sleep = of_property_present(dev->of_node, "mediatek,sleep-in") &&
++			of_property_present(dev->of_node, "mediatek,sleep-out");
++	of_property_read_u32(dev->of_node, "mediatek,sleep-in-delay-ms", &bl->sleep_in_ms);
++	of_property_read_u32(dev->of_node, "mediatek,sleep-out-delay-ms", &bl->sleep_out_ms);
+ 	/* 12-bit panels (vendor: max_bl_level 4095): DCS 0x51 takes two parameters */
+ 	bl->wide = of_property_read_bool(dev->of_node, "mediatek,dcs-brightness-12bit");
+ 
+-- 
+2.47.3
+

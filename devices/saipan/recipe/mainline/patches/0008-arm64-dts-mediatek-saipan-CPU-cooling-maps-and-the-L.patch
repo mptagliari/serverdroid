@@ -1,0 +1,101 @@
+From 922667b13660528d38f6ae10d664eb5db80b5908 Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 17:23:31 -0300
+Subject: [PATCH 08/18] arm64: dts: mediatek: saipan: CPU cooling maps and the
+ LK splash framebuffer
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 55 ++++++++++++++++++-
+ 1 file changed, 52 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 5e333baaa..77a3ac439 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -39,6 +39,20 @@ chosen {
+ 		ranges;
+ 		stdout-path = "serial0:921600n8";
+ 		bootargs = "console=ttyS0,921600n8";
++
++		/*
++		 * The splash framebuffer set up by LK (atag,videolfb: base 0x78a80000, 13824 KiB reserved as
++		 * mblock-21-framebuffer, panel icnl9911c_hd_dsi_vdo_incell_truly, 720x1600). The stride
++		 * (32-pixel aligned) and format are a guess to be checked against the buffer contents.
++		 */
++		framebuffer@78a80000 {
++			compatible = "simple-framebuffer";
++			reg = <0 0x78a80000 0 (736 * 1600 * 4)>;
++			width = <720>;
++			height = <1600>;
++			stride = <(736 * 4)>;
++			format = "a8r8g8b8";
++		};
+ 	};
+ 
+ 	pio_ml: pinctrl@10005000 {
+@@ -282,10 +296,11 @@ &ufshci {
+ };
+ 
+ /*
+- * Thermal (stage M5): LVTS sensors and trip points copied from the a22x file (same SoC; the
++ * Thermal (stages M5 and M8): LVTS sensors and trip points copied from the a22x file (same SoC; the
+  * sensor ids and the calibration cell are SoC-level). The trip temperatures are the a22x ones, not
+- * checked against the Motorola values. No cooling maps yet: they need the CPU frequency scaling,
+- * which needs the PMIC regulators. The 117 C critical trips still power the phone off.
++ * checked against the Motorola values. The CPU zones cool through the CPU frequency scaling
++ * (85 C and 95 C passive trips); the GPU zone has no cooling map because there is no GPU driver.
++ * The 117 C critical trips power the phone off.
+  */
+ / {
+ 	efuse_ml: efuse@11c10000 {
+@@ -334,6 +349,27 @@ little_crit: trip-crit {
+ 					type = "critical";
+ 				};
+ 			};
++			cooling-maps {
++				map0 {
++					trip = <&little_alert>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&little_hot>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
+ 		};
+ 
+ 		cpu-big-thermal {
+@@ -360,6 +396,19 @@ big_crit: trip-crit {
+ 					type = "critical";
+ 				};
+ 			};
++			cooling-maps {
++				map0 {
++					trip = <&big_alert>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++
++				map1 {
++					trip = <&big_hot>;
++					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++				};
++			};
+ 		};
+ 
+ 		gpu-thermal {
+-- 
+2.47.3
+

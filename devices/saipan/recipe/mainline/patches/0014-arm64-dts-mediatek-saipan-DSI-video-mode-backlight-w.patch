@@ -1,0 +1,40 @@
+From 4b274e6189b835466f9f42bce3553d96da2e75da Mon Sep 17 00:00:00 2001
+From: study <study@example.invalid>
+Date: Sat, 24 Oct 2026 20:07:59 -0300
+Subject: [PATCH 14/18] arm64: dts: mediatek: saipan: DSI video-mode backlight
+ with the vendor's 12-bit DCS brightness
+
+---
+ .../dts/mediatek/mt6833-motorola-saipan.dts   | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+index 5e1a353b5..254d4b3dd 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6833-motorola-saipan.dts
+@@ -1027,3 +1027,22 @@ timer@10017000 {
+ 		clocks = <&clk13m>;
+ 	};
+ };
++
++/*
++ * Backlight (stage M21): the LK log says "The backlight hw mode is LCM": the panel sets the brightness
++ * itself, by DCS 0x51 over DSI (DISP_PWM0 is idle in the LK state, and enabling its driver blanked the
++ * display, M13). The vendor panel driver (drivers/gpu/drm/panel/dsi-panel-mot-truly-icnl9911c-hd-
++ * video.c) sends {0x51, DBV[11:8], DBV[7:0]}, 12 bits, max_bl_level 4095, WRCTRLD 0x53 = 0x2c once
++ * at init (LK already did it), and passes the level through unchanged. The first attempt (M14) sent a
++ * one-parameter 0x51 and the picture was corrupted; this node makes the driver send the two-parameter
++ * long write the vendor kernel uses, and does not write anything at boot.
++ */
++/ {
++	backlight: backlight@14013000 {
++		compatible = "mediatek,dsi-vm-backlight";
++		reg = <0 0x14013000 0 0x1000>;
++		mediatek,dcs-brightness-12bit;
++		mediatek,skip-initial-write;
++		default-brightness-level = <127>;
++	};
++};
+-- 
+2.47.3
+

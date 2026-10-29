@@ -1,0 +1,176 @@
+From 7dc5f9c7cfc8b115e173e8e386f8e74b1232ddd2 Mon Sep 17 00:00:00 2001
+From: Matheus Tagliari <160161347+mptagliari@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 17:29:32 -0300
+Subject: [PATCH] power: supply: mt6360: enable charging and add
+ charge_behaviour (auto, inhibit-charge, force-discharge)
+
+CHG_CTRL2 bit 1 (CFO_EN in the vendor header) must be set together with
+CHG_EN for the input to power the system and charge the battery on the
+Moto G50 5G; with CHG_EN clear and bit 1 set the source powers the system
+and the battery rests, with both clear the battery powers the system (the
+state the bootloader leaves). Expose the three states as charge_behaviour
+and select auto at probe. Disable the charger watchdog, whose expiry
+resets CHG_CTRL2 to the battery-only state.
+---
+ drivers/power/supply/mt6360_charger.c | 82 +++++++++++++++++++++++++++
+ 1 file changed, 82 insertions(+)
+
+diff --git a/drivers/power/supply/mt6360_charger.c b/drivers/power/supply/mt6360_charger.c
+index d3b0731f6..3462105e5 100644
+--- a/drivers/power/supply/mt6360_charger.c
++++ b/drivers/power/supply/mt6360_charger.c
+@@ -26,6 +26,7 @@
+ #define MT6360_PMU_CHG_CTRL8	0x318
+ #define MT6360_PMU_CHG_CTRL9	0x319
+ #define MT6360_PMU_CHG_CTRL10	0x31A
++#define MT6360_PMU_CHG_CTRL13	0x31D
+ #define MT6360_PMU_DEVICE_TYPE	0x322
+ #define MT6360_PMU_USB_STATUS1	0x327
+ #define MT6360_PMU_CHG_STAT	0x34A
+@@ -38,6 +39,8 @@
+ #define MT6360_OPA_MODE_SHFT	(0)
+ #define MT6360_OPA_MODE_MASK	BIT(MT6360_OPA_MODE_SHFT)
+ /* MT6360_PMU_CHG_CTRL2 */
++#define MT6360_CHG_EN_MASK	BIT(0)
++#define MT6360_INPUT_PATH_MASK	BIT(1)	/* "CFO_EN" in the vendor header */
+ #define MT6360_IINLMTSEL_SHFT	(2)
+ #define MT6360_IINLMTSEL_MASK	GENMASK(3, 2)
+ /* MT6360_PMU_CHG_CTRL3 */
+@@ -63,6 +66,8 @@
+ #define MT6360_IEOC_MASK	GENMASK(7, 4)
+ /* MT6360_PMU_CHG_CTRL10 */
+ #define MT6360_OTG_OC_MASK	GENMASK(3, 0)
++/* MT6360_PMU_CHG_CTRL13 */
++#define MT6360_CHG_WDT_EN_MASK	BIT(7)
+ /* MT6360_PMU_DEVICE_TYPE */
+ #define MT6360_USBCHGEN_MASK	BIT(7)
+ /* MT6360_PMU_USB_STATUS1 */
+@@ -371,6 +376,55 @@ static int mt6360_charger_set_online(struct mt6360_chg_info *mci,
+ 				  force_sleep << MT6360_FSLP_SHFT);
+ }
+ 
++/*
++ * Bit 1 of CHG_CTRL2 must be set for the input to power the system (the vendor
++ * header names it CFO_EN); CHG_EN then decides whether the battery is charged:
++ *   auto            both set   the source powers the system and charges the battery
++ *   inhibit-charge  bit 1 only the source powers the system, the battery rests
++ *   force-discharge neither    the battery powers the system
++ * Measured on the Moto G50 5G (saipan); the boot state is "neither".
++ */
++static int mt6360_charger_get_behaviour(struct mt6360_chg_info *mci,
++					union power_supply_propval *val)
++{
++	unsigned int regval;
++	int ret;
++
++	ret = regmap_read(mci->regmap, MT6360_PMU_CHG_CTRL2, &regval);
++	if (ret < 0)
++		return ret;
++	if (!(regval & MT6360_INPUT_PATH_MASK))
++		val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_FORCE_DISCHARGE;
++	else if (regval & MT6360_CHG_EN_MASK)
++		val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO;
++	else
++		val->intval = POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE;
++	return 0;
++}
++
++static int mt6360_charger_set_behaviour(struct mt6360_chg_info *mci,
++					const union power_supply_propval *val)
++{
++	unsigned int bits;
++
++	switch (val->intval) {
++	case POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO:
++		bits = MT6360_INPUT_PATH_MASK | MT6360_CHG_EN_MASK;
++		break;
++	case POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE:
++		bits = MT6360_INPUT_PATH_MASK;
++		break;
++	case POWER_SUPPLY_CHARGE_BEHAVIOUR_FORCE_DISCHARGE:
++		bits = 0;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return regmap_update_bits(mci->regmap, MT6360_PMU_CHG_CTRL2,
++				  MT6360_INPUT_PATH_MASK | MT6360_CHG_EN_MASK,
++				  bits);
++}
++
+ static int mt6360_charger_set_ichg(struct mt6360_chg_info *mci,
+ 				   const union power_supply_propval *val)
+ {
+@@ -484,6 +538,9 @@ static int mt6360_charger_get_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
+ 		ret = mt6360_charger_get_ieoc(mci, val);
+ 		break;
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
++		ret = mt6360_charger_get_behaviour(mci, val);
++		break;
+ 	case POWER_SUPPLY_PROP_USB_TYPE:
+ 		val->intval = mci->psy_usb_type;
+ 		break;
+@@ -522,6 +579,9 @@ static int mt6360_charger_set_property(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
+ 		ret = mt6360_charger_set_ieoc(mci, val);
+ 		break;
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
++		ret = mt6360_charger_set_behaviour(mci, val);
++		break;
+ 	default:
+ 		ret = -EINVAL;
+ 	}
+@@ -539,6 +599,7 @@ static int mt6360_charger_property_is_writeable(struct power_supply *psy,
+ 	case POWER_SUPPLY_PROP_INPUT_VOLTAGE_LIMIT:
+ 	case POWER_SUPPLY_PROP_PRECHARGE_CURRENT:
+ 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
++	case POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR:
+ 		return 1;
+ 	default:
+ 		return 0;
+@@ -557,6 +618,7 @@ static enum power_supply_property mt6360_charger_properties[] = {
+ 	POWER_SUPPLY_PROP_INPUT_VOLTAGE_LIMIT,
+ 	POWER_SUPPLY_PROP_PRECHARGE_CURRENT,
+ 	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
++	POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR,
+ 	POWER_SUPPLY_PROP_USB_TYPE,
+ };
+ 
+@@ -567,6 +629,9 @@ static const struct power_supply_desc mt6360_charger_desc = {
+ 	.get_property		= mt6360_charger_get_property,
+ 	.set_property		= mt6360_charger_set_property,
+ 	.property_is_writeable	= mt6360_charger_property_is_writeable,
++	.charge_behaviours	= BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO) |
++				  BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE) |
++				  BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_FORCE_DISCHARGE),
+ 	.usb_types		= BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+ 				  BIT(POWER_SUPPLY_USB_TYPE_CDP) |
+ 				  BIT(POWER_SUPPLY_USB_TYPE_DCP) |
+@@ -773,6 +838,23 @@ static int mt6360_chg_init_setting(struct mt6360_chg_info *mci)
+ 	if (ret)
+ 		return dev_err_probe(mci->dev, ret,
+ 				     "%s: Failed to config otg oc to 3A\n", __func__);
++	/*
++	 * Nothing kicks the charger watchdog (a read of CHG_CTRL1), and when it
++	 * expires the charger registers return to their defaults, i.e. CHG_CTRL2
++	 * to "force-discharge". The vendor driver disables it as well.
++	 */
++	ret = regmap_update_bits(mci->regmap, MT6360_PMU_CHG_CTRL13,
++				 MT6360_CHG_WDT_EN_MASK, 0);
++	if (ret)
++		return dev_err_probe(mci->dev, ret,
++				     "%s: Failed to disable the watchdog\n", __func__);
++	/* the charger starts in "force-discharge" (battery only): switch to auto */
++	ret = regmap_update_bits(mci->regmap, MT6360_PMU_CHG_CTRL2,
++				 MT6360_INPUT_PATH_MASK | MT6360_CHG_EN_MASK,
++				 MT6360_INPUT_PATH_MASK | MT6360_CHG_EN_MASK);
++	if (ret)
++		return dev_err_probe(mci->dev, ret,
++				     "%s: Failed to enable charging\n", __func__);
+ 	return 0;
+ }
+ 
+-- 
+2.47.3
+
